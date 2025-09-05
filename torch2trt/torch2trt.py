@@ -1,8 +1,6 @@
 import torch
 import tensorrt as trt
-import copy
 import numpy as np
-import io
 from collections import defaultdict
 import importlib
 
@@ -13,18 +11,15 @@ from .dataset_calibrator import (
 
 from .dataset import (
     Dataset,
-    TensorBatchDataset,
     ListDataset
 )
 
 from .flattener import Flattener
-from .flatten_module import Flatten, Unflatten
-from .version_utils import trt_version, torch_version
+from .flatten_module import Flatten
+from .version_utils import trt_version
 from .trt_module import TRTModule
 from .misc_utils import (
-    torch_device_from_trt,
     torch_device_to_trt,
-    torch_dtype_from_trt,
     torch_dtype_to_trt,
     trt_int_dtype
 )
@@ -561,17 +556,17 @@ def torch2trt(module,
 
     # infer default parameters from dataset
 
-    if min_shapes == None:
+    if min_shapes is None:
         min_shapes_flat = [tuple(t) for t in dataset.min_shapes(flat=True)]
     else:
         min_shapes_flat = input_flattener.flatten(min_shapes)
 
-    if max_shapes == None:
+    if max_shapes is None:
         max_shapes_flat = [tuple(t) for t in dataset.max_shapes(flat=True)]
     else:
         max_shapes_flat = input_flattener.flatten(max_shapes)
     
-    if opt_shapes == None:
+    if opt_shapes is None:
         opt_shapes_flat = [tuple(t) for t in dataset.median_numel_shapes(flat=True)]
     else:
         opt_shapes_flat = input_flattener.flatten(opt_shapes)
@@ -600,37 +595,52 @@ def torch2trt(module,
     if use_onnx:
         import onnx_graphsurgeon as gs
         import onnx
-        
+        import tempfile
+        import os
+
         module_flat = Flatten(module, input_flattener, output_flattener)
         inputs_flat = input_flattener.flatten(inputs)
 
-        f = io.BytesIO()
-        torch.onnx.export(
-            module_flat, 
-            inputs_flat, 
-            f, 
-            input_names=input_names, 
-            output_names=output_names,
-            dynamic_axes={
-                name: {int(axis): f'input_{index}_axis_{axis}' for axis in dynamic_axes_flat[index]}
-                for index, name in enumerate(input_names)
-            },
-            opset_version=onnx_opset
-        )
-        f.seek(0)
-        
-        onnx_graph = gs.import_onnx(onnx.load(f))
-        onnx_graph.fold_constants().cleanup()
+        # Export, optimize, and parse ONNX via a temp directory (auto-cleaned)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_in_path = os.path.join(tmpdir, "model_in.onnx")
+            export_args = dict(
+                model=module_flat,
+                args=inputs_flat,
+                f=tmp_in_path,
+                input_names=input_names,
+                output_names=output_names,
+                dynamic_axes={
+                    name: {int(axis): f"input_{index}_axis_{axis}" for axis in dynamic_axes_flat[index]}
+                    for index, name in enumerate(input_names)
+                },
+            )
+            if onnx_opset is not None:
+                export_args["opset_version"] = onnx_opset
+            torch.onnx.export(**export_args)
 
+            # Load and manipulate ONNX graph
+            onnx_graph = gs.import_onnx(onnx.load(tmp_in_path))
+            onnx_graph.fold_constants().cleanup()
 
-        f = io.BytesIO()
-        onnx.save(gs.export_onnx(onnx_graph), f)
-        f.seek(0)
+            # Save manipulated graph to another temp file
+            tmp_out_path = os.path.join(tmpdir, "model_out.onnx")
+            onnx.save(gs.export_onnx(onnx_graph), tmp_out_path)
 
-        onnx_bytes = f.read()
-        network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
-        parser = trt.OnnxParser(network, logger)
-        parser.parse(onnx_bytes)
+            # Create network and parser, and parse ONNX inside context
+            network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+            parser = trt.OnnxParser(network, logger)
+            # Use context manager to read ONNX file if needed
+            if hasattr(parser, "parse_from_file"):
+                parsed = parser.parse_from_file(tmp_out_path)
+            else:
+                with open(tmp_out_path, "rb") as f:
+                    parsed = parser.parse(f.read())
+            # Log parse errors:
+            if not parsed:
+                for i in range(parser.num_errors):
+                    logger.log(trt.Logger.ERROR, str(parser.get_error(i)))
+                raise RuntimeError("Failed to parse ONNX model.")
 
     else:
         network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
@@ -674,7 +684,7 @@ def torch2trt(module,
         config.set_flag(trt.BuilderFlag.INT8)
 
         #Making sure not to run calibration with QAT mode on
-        if not 'qat_mode' in kwargs:
+        if not kwargs.get('qat_mode', False):
             calibrator = DatasetCalibrator(
                 int8_calib_dataset, algorithm=int8_calib_algorithm
             )
@@ -720,8 +730,12 @@ def get_module_qualname(name):
         try:
             module = importlib.import_module(modulename)
             return module, modulename, qualname
-        except:
-            pass
+        except ModuleNotFoundError:
+            # keep searching for a valid split point
+            continue
+        except ImportError as e:
+            # Surface unexpected import issues
+            raise RuntimeError("Failed to parse ONNX model. " + e.msg)
 
     raise RuntimeError("Could not import module")
 
@@ -734,8 +748,9 @@ def tensorrt_converter(method, is_real=True, enabled=True, imports=[]):
         module, module_name, qual_name = importlib.import_module(method.__module__), method.__module__, method.__qualname__
 
     try:
-        method_impl = eval('copy.deepcopy(module.%s)' % qual_name)
-    except:
+        # No deepcopy needed; store original callable
+        method_impl = eval('module.%s' % qual_name)
+    except AttributeError:
         enabled = False
 
     def register_converter(converter):
