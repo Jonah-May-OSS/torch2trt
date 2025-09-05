@@ -601,21 +601,23 @@ def torch2trt(module,
         module_flat = Flatten(module, input_flattener, output_flattener)
         inputs_flat = input_flattener.flatten(inputs)
 
-        # Export, optimize, and read ONNX via a temp directory (auto-cleaned)
+        # Export, optimize, and parse ONNX via a temp directory (auto-cleaned)
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_in_path = os.path.join(tmpdir, "model_in.onnx")
-            torch.onnx.export(
-                module_flat,
-                inputs_flat,
-                tmp_in_path,
+            export_args = dict(
+                model=module_flat,
+                args=inputs_flat,
+                f=tmp_in_path,
                 input_names=input_names,
                 output_names=output_names,
                 dynamic_axes={
                     name: {int(axis): f"input_{index}_axis_{axis}" for axis in dynamic_axes_flat[index]}
                     for index, name in enumerate(input_names)
                 },
-                opset_version=onnx_opset,
             )
+            if onnx_opset is not None:
+                export_args["opset_version"] = onnx_opset
+            torch.onnx.export(**export_args)
 
             # Load and manipulate ONNX graph
             onnx_graph = gs.import_onnx(onnx.load(tmp_in_path))
@@ -625,16 +627,19 @@ def torch2trt(module,
             tmp_out_path = os.path.join(tmpdir, "model_out.onnx")
             onnx.save(gs.export_onnx(onnx_graph), tmp_out_path)
 
-            # Read ONNX bytes from the temp file
-            onnx_path = tmp_out_path
-
-        network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
-        parser = trt.OnnxParser(network, logger)
-        parsed = parser.parse_from_file(onnx_path) if hasattr(parser, "parse_from_file") else parser.parse(open(onnx_path, "rb").read())
-        # Log parse errors:
-        if not parsed:
-            for i in range(parser.num_errors):
-                logger.log(trt.Logger.ERROR, str(parser.get_error(i)))
+            # Create network and parser, and parse ONNX inside context
+            network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+            parser = trt.OnnxParser(network, logger)
+            # Use context manager to read ONNX file if needed
+            if hasattr(parser, "parse_from_file"):
+                parsed = parser.parse_from_file(tmp_out_path)
+            else:
+                with open(tmp_out_path, "rb") as f:
+                    parsed = parser.parse(f.read())
+            # Log parse errors:
+            if not parsed:
+                for i in range(parser.num_errors):
+                    logger.log(trt.Logger.ERROR, str(parser.get_error(i)))
 
     else:
         network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
@@ -678,7 +683,7 @@ def torch2trt(module,
         config.set_flag(trt.BuilderFlag.INT8)
 
         #Making sure not to run calibration with QAT mode on
-        if 'qat_mode' not in kwargs:
+        if not kwargs.get('qat_mode', False):
             calibrator = DatasetCalibrator(
                 int8_calib_dataset, algorithm=int8_calib_algorithm
             )
@@ -724,7 +729,11 @@ def get_module_qualname(name):
         try:
             module = importlib.import_module(modulename)
             return module, modulename, qualname
+        except ModuleNotFoundError:
+            # keep searching for a valid split point
+            pass
         except Exception:
+            # Unexpected import error; continue searching but don't swallow silently in debug builds
             pass
 
     raise RuntimeError("Could not import module")
@@ -739,8 +748,10 @@ def tensorrt_converter(method, is_real=True, enabled=True, imports=[]):
 
     try:
         method_impl = eval('copy.deepcopy(module.%s)' % qual_name)
-    except Exception:
+    except (AttributeError, NameError):
         enabled = False
+    except Exception:
+        enabled = False  # unexpected, but disable safely
 
     def register_converter(converter):
         CONVERTERS[method] = {
