@@ -11,18 +11,15 @@ from .dataset_calibrator import (
 
 from .dataset import (
     Dataset,
-    TensorBatchDataset,
     ListDataset
 )
 
 from .flattener import Flattener
-from .flatten_module import Flatten, Unflatten
-from .version_utils import trt_version, torch_version
+from .flatten_module import Flatten
+from .version_utils import trt_version
 from .trt_module import TRTModule
 from .misc_utils import (
-    torch_device_from_trt,
     torch_device_to_trt,
-    torch_dtype_from_trt,
     torch_dtype_to_trt,
     trt_int_dtype
 )
@@ -559,17 +556,17 @@ def torch2trt(module,
 
     # infer default parameters from dataset
 
-    if min_shapes == None:
+    if min_shapes is None:
         min_shapes_flat = [tuple(t) for t in dataset.min_shapes(flat=True)]
     else:
         min_shapes_flat = input_flattener.flatten(min_shapes)
 
-    if max_shapes == None:
+    if max_shapes is None:
         max_shapes_flat = [tuple(t) for t in dataset.max_shapes(flat=True)]
     else:
         max_shapes_flat = input_flattener.flatten(max_shapes)
     
-    if opt_shapes == None:
+    if opt_shapes is None:
         opt_shapes_flat = [tuple(t) for t in dataset.median_numel_shapes(flat=True)]
     else:
         opt_shapes_flat = input_flattener.flatten(opt_shapes)
@@ -681,7 +678,7 @@ def torch2trt(module,
         config.set_flag(trt.BuilderFlag.INT8)
 
         #Making sure not to run calibration with QAT mode on
-        if not 'qat_mode' in kwargs:
+        if 'qat_mode' not in kwargs:
             calibrator = DatasetCalibrator(
                 int8_calib_dataset, algorithm=int8_calib_algorithm
             )
@@ -727,7 +724,7 @@ def get_module_qualname(name):
         try:
             module = importlib.import_module(modulename)
             return module, modulename, qualname
-        except:
+        except Exception:
             pass
 
     raise RuntimeError("Could not import module")
@@ -742,7 +739,7 @@ def tensorrt_converter(method, is_real=True, enabled=True, imports=[]):
 
     try:
         method_impl = eval('copy.deepcopy(module.%s)' % qual_name)
-    except:
+    except Exception:
         enabled = False
 
     def register_converter(converter):
