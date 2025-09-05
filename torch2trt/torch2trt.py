@@ -1,8 +1,6 @@
 import torch
 import tensorrt as trt
-import copy
 import numpy as np
-import io
 from collections import defaultdict
 import importlib
 
@@ -601,44 +599,45 @@ def torch2trt(module,
         import onnx_graphsurgeon as gs
         import onnx
         import tempfile
+        import os
 
         module_flat = Flatten(module, input_flattener, output_flattener)
         inputs_flat = input_flattener.flatten(inputs)
 
-        # Export ONNX to a temp file
-        with tempfile.NamedTemporaryFile(suffix=".onnx", delete=False) as tmp_in:
+        # Export, optimize, and read ONNX via a temp directory (auto-cleaned)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_in_path = os.path.join(tmpdir, "model_in.onnx")
             torch.onnx.export(
                 module_flat,
                 inputs_flat,
-                tmp_in.name,
+                tmp_in_path,
                 input_names=input_names,
                 output_names=output_names,
                 dynamic_axes={
-                    name: {int(axis): f'input_{index}_axis_{axis}' for axis in dynamic_axes_flat[index]}
+                    name: {int(axis): f"input_{index}_axis_{axis}" for axis in dynamic_axes_flat[index]}
                     for index, name in enumerate(input_names)
                 },
-                opset_version=onnx_opset
+                opset_version=onnx_opset,
             )
-            tmp_in.flush()
-            tmp_in_path = tmp_in.name
 
-        # Load and manipulate ONNX graph
-        onnx_graph = gs.import_onnx(onnx.load(tmp_in_path))
-        onnx_graph.fold_constants().cleanup()
+            # Load and manipulate ONNX graph
+            onnx_graph = gs.import_onnx(onnx.load(tmp_in_path))
+            onnx_graph.fold_constants().cleanup()
 
-        # Save manipulated graph to another temp file
-        with tempfile.NamedTemporaryFile(suffix=".onnx", delete=False) as tmp_out:
-            onnx.save(gs.export_onnx(onnx_graph), tmp_out)
-            tmp_out.flush()
-            tmp_out_path = tmp_out.name
+            # Save manipulated graph to another temp file
+            tmp_out_path = os.path.join(tmpdir, "model_out.onnx")
+            onnx.save(gs.export_onnx(onnx_graph), tmp_out_path)
 
-        # Read ONNX bytes from the temp file
-        with open(tmp_out_path, "rb") as f:
-            onnx_bytes = f.read()
+            # Read ONNX bytes from the temp file
+            onnx_path = tmp_out_path
 
         network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
         parser = trt.OnnxParser(network, logger)
-        parser.parse(onnx_bytes)
+        parsed = parser.parse_from_file(onnx_path) if hasattr(parser, "parse_from_file") else parser.parse(open(onnx_path, "rb").read())
+        # Log parse errors:
+        if not parsed:
+            for i in range(parser.num_errors):
+                logger.log(trt.Logger.ERROR, str(parser.get_error(i)))
 
     else:
         network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
