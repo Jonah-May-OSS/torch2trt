@@ -600,34 +600,42 @@ def torch2trt(module,
     if use_onnx:
         import onnx_graphsurgeon as gs
         import onnx
-        
+        import tempfile
+
         module_flat = Flatten(module, input_flattener, output_flattener)
         inputs_flat = input_flattener.flatten(inputs)
 
-        f = io.BytesIO()
-        torch.onnx.export(
-            module_flat, 
-            inputs_flat, 
-            f, 
-            input_names=input_names, 
-            output_names=output_names,
-            dynamic_axes={
-                name: {int(axis): f'input_{index}_axis_{axis}' for axis in dynamic_axes_flat[index]}
-                for index, name in enumerate(input_names)
-            },
-            opset_version=onnx_opset
-        )
-        f.seek(0)
-        
-        onnx_graph = gs.import_onnx(onnx.load(f))
+        # Export ONNX to a temp file
+        with tempfile.NamedTemporaryFile(suffix=".onnx", delete=False) as tmp_in:
+            torch.onnx.export(
+                module_flat,
+                inputs_flat,
+                tmp_in.name,
+                input_names=input_names,
+                output_names=output_names,
+                dynamic_axes={
+                    name: {int(axis): f'input_{index}_axis_{axis}' for axis in dynamic_axes_flat[index]}
+                    for index, name in enumerate(input_names)
+                },
+                opset_version=onnx_opset
+            )
+            tmp_in.flush()
+            tmp_in_path = tmp_in.name
+
+        # Load and manipulate ONNX graph
+        onnx_graph = gs.import_onnx(onnx.load(tmp_in_path))
         onnx_graph.fold_constants().cleanup()
 
+        # Save manipulated graph to another temp file
+        with tempfile.NamedTemporaryFile(suffix=".onnx", delete=False) as tmp_out:
+            onnx.save(gs.export_onnx(onnx_graph), tmp_out)
+            tmp_out.flush()
+            tmp_out_path = tmp_out.name
 
-        f = io.BytesIO()
-        onnx.save(gs.export_onnx(onnx_graph), f)
-        f.seek(0)
+        # Read ONNX bytes from the temp file
+        with open(tmp_out_path, "rb") as f:
+            onnx_bytes = f.read()
 
-        onnx_bytes = f.read()
         network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
         parser = trt.OnnxParser(network, logger)
         parser.parse(onnx_bytes)
