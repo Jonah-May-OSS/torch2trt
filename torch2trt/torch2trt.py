@@ -640,6 +640,7 @@ def torch2trt(module,
             if not parsed:
                 for i in range(parser.num_errors):
                     logger.log(trt.Logger.ERROR, str(parser.get_error(i)))
+                raise RuntimeError("Failed to parse ONNX model.")
 
     else:
         network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
@@ -731,10 +732,10 @@ def get_module_qualname(name):
             return module, modulename, qualname
         except ModuleNotFoundError:
             # keep searching for a valid split point
-            pass
-        except Exception:
-            # Unexpected import error; continue searching but don't swallow silently in debug builds
-            pass
+            continue
+        except ImportError as e:
+            # Surface unexpected import issues
+            raise RuntimeError("Failed to parse ONNX model. " + e.msg)
 
     raise RuntimeError("Could not import module")
 
@@ -747,11 +748,10 @@ def tensorrt_converter(method, is_real=True, enabled=True, imports=[]):
         module, module_name, qual_name = importlib.import_module(method.__module__), method.__module__, method.__qualname__
 
     try:
-        method_impl = eval('copy.deepcopy(module.%s)' % qual_name)
-    except (AttributeError, NameError):
+        # No deepcopy needed; store original callable
+        method_impl = eval('module.%s' % qual_name)
+    except AttributeError:
         enabled = False
-    except Exception:
-        enabled = False  # unexpected, but disable safely
 
     def register_converter(converter):
         CONVERTERS[method] = {
