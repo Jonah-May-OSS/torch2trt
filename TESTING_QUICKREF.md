@@ -34,6 +34,7 @@ pip install -r requirements-test.txt
 python run_tests.py
 python run_tests.py --features
 python run_tests.py --coverage
+python run_tests.py --lint
 ```
 
 **Option 2: Pytest directly**
@@ -48,6 +49,22 @@ pytest tests/converter_tests/ -v
 make test
 make test-features
 make test-coverage
+make lint
+```
+
+## Code Linting
+
+The project uses [ruff](https://docs.astral.sh/ruff/) for linting:
+
+```bash
+# Run linter
+python run_tests.py --lint
+make lint
+ruff check torch2trt/ tests/ run_tests.py
+
+# Format code
+make format
+ruff format torch2trt/ tests/ run_tests.py
 ```
 
 ## Test Organization
@@ -71,6 +88,7 @@ View status: `.github/workflows/tests.yml`
 ✅ Test categorization with pytest markers
 ✅ Parallel test execution support
 ✅ Code coverage reporting
+✅ Code linting with ruff
 ✅ Multiple ways to run tests
 ✅ Comprehensive documentation
 ✅ Easy-to-use test runner script

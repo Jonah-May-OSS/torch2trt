@@ -10,6 +10,7 @@ Usage:
     python run_tests.py --models           # Run model tests only
     python run_tests.py --coverage         # Run with coverage
     python run_tests.py --parallel         # Run in parallel
+    python run_tests.py --lint             # Run ruff linter
 """
 
 import argparse
@@ -51,6 +52,11 @@ def main():
         help="Run tests in parallel"
     )
     parser.add_argument(
+        "--lint",
+        action="store_true",
+        help="Run ruff linter instead of tests"
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -64,6 +70,22 @@ def main():
     )
     
     args = parser.parse_args()
+    
+    # Run linter if requested
+    if args.lint:
+        cmd = ["ruff", "check", "torch2trt/", "tests/", "run_tests.py"]
+        print(f"Running: {' '.join(cmd)}")
+        print("-" * 80)
+        try:
+            result = subprocess.run(cmd, check=False)
+            sys.exit(result.returncode)
+        except FileNotFoundError:
+            print("\nError: ruff not found. Install test dependencies with:")
+            print("  pip install -r requirements-test.txt")
+            sys.exit(1)
+        except KeyboardInterrupt:
+            print("\nLinting interrupted by user")
+            sys.exit(130)
     
     # Build pytest command
     cmd = ["pytest"]

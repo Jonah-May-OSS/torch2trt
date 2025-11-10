@@ -35,6 +35,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements-test.txt
         
+    - name: Run ruff linter
+      run: |
+        ruff check torch2trt/ tests/ run_tests.py
+      continue-on-error: false
+        
     - name: Install PyTorch and torchvision
       run: |
         pip install torch torchvision

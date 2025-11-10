@@ -158,9 +158,53 @@ make test-models
 # Run tests with coverage
 make test-coverage
 
+# Run linter
+make lint
+
+# Format code
+make format
+
 # Clean test artifacts
 make clean-test
 ```
+
+## Code Linting and Formatting
+
+This project uses [ruff](https://docs.astral.sh/ruff/) for fast Python linting and formatting.
+
+### Running the Linter
+
+Check code for style and potential issues:
+
+```bash
+# Using the Python test runner
+python run_tests.py --lint
+
+# Using pytest directly
+ruff check torch2trt/ tests/ run_tests.py
+
+# Using Makefile
+make lint
+```
+
+### Formatting Code
+
+Automatically format code:
+
+```bash
+# Format all code
+ruff format torch2trt/ tests/ run_tests.py
+
+# Using Makefile
+make format
+```
+
+### Ruff Configuration
+
+Ruff is configured in `ruff.toml` with:
+- Target Python 3.8+
+- Line length: 100 characters
+- Enabled rules: pycodestyle, pyflakes, isort, pep8-naming, pyupgrade, flake8-bugbear
 
 ## Test Markers
 

@@ -15,6 +15,7 @@ The main test workflow runs automatically on:
 
 The workflow runs tests on a self-hosted runner with GPU/CUDA/TensorRT support:
 - Uses Python 3.13
+- Runs ruff linter for code quality checks
 - Runs the complete test suite including:
   - Converter tests (require TensorRT)
   - Model conversion tests (require CUDA)
@@ -55,9 +56,13 @@ The workflow file is located at `.github/workflows/tests.yml`. You can customize
 
 ## Local Testing Before Push
 
-Before pushing changes, run tests locally:
+Before pushing changes, run tests and linter locally:
 
 ```bash
+# Run linter
+python run_tests.py --lint
+make lint
+
 # Quick validation
 python run_tests.py --features
 

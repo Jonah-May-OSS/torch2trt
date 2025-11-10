@@ -1,4 +1,4 @@
-.PHONY: help test test-converters test-features test-models test-coverage test-fast clean-test install-test-deps
+.PHONY: help test test-converters test-features test-models test-coverage test-fast clean-test install-test-deps lint format
 
 help:
 	@echo "torch2trt Testing Commands"
@@ -10,11 +10,19 @@ help:
 	@echo "make test-models       - Run model tests only"
 	@echo "make test-fast         - Run tests in parallel"
 	@echo "make test-coverage     - Run tests with coverage report"
+	@echo "make lint              - Run ruff linter"
+	@echo "make format            - Format code with ruff"
 	@echo "make clean-test        - Clean test artifacts"
 	@echo "make install-test-deps - Install test dependencies"
 
 install-test-deps:
 	pip install -r requirements-test.txt
+
+lint:
+	ruff check torch2trt/ tests/ run_tests.py
+
+format:
+	ruff format torch2trt/ tests/ run_tests.py
 
 test:
 	pytest tests/ -v
