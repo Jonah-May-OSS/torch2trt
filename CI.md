@@ -11,27 +11,9 @@ The main test workflow runs automatically on:
 
 ## Workflow Details
 
-### Test Jobs
+### Test Job
 
-The workflow includes two separate test jobs:
-
-#### 1. CPU Tests (ubuntu-latest)
-Tests run on multiple Python versions:
-- Python 3.8
-- Python 3.9
-- Python 3.10
-- Python 3.11
-- Python 3.13
-
-Due to the dependency on CUDA and TensorRT, this job runs with CPU-only PyTorch and executes a limited subset of tests:
-- Version utility tests
-- Flattener tests
-- Dataset tests
-
-These tests verify basic functionality without requiring GPU hardware.
-
-#### 2. GPU Tests (self-hosted)
-Runs on a self-hosted runner with GPU/CUDA/TensorRT support:
+The workflow runs tests on a self-hosted runner with GPU/CUDA/TensorRT support:
 - Uses Python 3.13
 - Runs the complete test suite including:
   - Converter tests (require TensorRT)
@@ -40,6 +22,8 @@ Runs on a self-hosted runner with GPU/CUDA/TensorRT support:
   - Performance benchmarks (require GPU)
 - Generates coverage reports
 - Only runs on the main repository (not forks)
+
+**Note**: Since torch2trt requires TensorRT, which in turn requires a GPU, all tests must run on a GPU-enabled system. There are no CPU-only tests.
 
 ### Requirements for Self-Hosted Runner
 
