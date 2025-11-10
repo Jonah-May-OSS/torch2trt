@@ -7,6 +7,11 @@ from .version_utils import (
 )
 
 
+# Cache device objects to avoid repeated construction
+_CUDA_DEVICE = torch.device("cuda")
+_CPU_DEVICE = torch.device("cpu")
+
+
 def torch_dtype_to_trt(dtype):
     if trt_version() >= '7.0' and dtype == torch.bool:
         return trt.bool
@@ -38,21 +43,21 @@ def torch_dtype_from_trt(dtype):
 
 
 def torch_device_to_trt(device):
-    if device.type == torch.device("cuda").type:
+    if device.type == _CUDA_DEVICE.type:
         return trt.TensorLocation.DEVICE
-    elif device.type == torch.device("cpu").type:
+    elif device.type == _CPU_DEVICE.type:
         return trt.TensorLocation.HOST
     else:
-        return TypeError("%s is not supported by tensorrt" % device)
+        raise TypeError("%s is not supported by tensorrt" % device)
 
 
 def torch_device_from_trt(device):
     if device == trt.TensorLocation.DEVICE:
-        return torch.device("cuda")
+        return _CUDA_DEVICE
     elif device == trt.TensorLocation.HOST:
-        return torch.device("cpu")
+        return _CPU_DEVICE
     else:
-        return TypeError("%s is not supported by torch" % device)
+        raise TypeError("%s is not supported by torch" % device)
 
 
 def trt_int_dtype():

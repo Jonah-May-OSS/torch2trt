@@ -26,19 +26,11 @@ from .misc_utils import (
 # UTILITY FUNCTIONS
 
 def trt_num_inputs(engine):
-    count = 0
-    for i in range(engine.num_bindings):
-        if engine.binding_is_input(i):
-            count += 1
-    return count
+    return sum(1 for i in range(engine.num_bindings) if engine.binding_is_input(i))
 
 
 def trt_num_outputs(engine):
-    count = 0
-    for i in range(engine.num_bindings):
-        if not engine.binding_is_input(i):
-            count += 1
-    return count
+    return sum(1 for i in range(engine.num_bindings) if not engine.binding_is_input(i))
 
 
 def torch_dim_resolve_negative(dim, ndim):
@@ -324,20 +316,12 @@ class NetworkWrapper(object):
                     device_type = trt.DeviceType.GPU  # layer will fall back to GPU
             
             # set layer name
-            def arg_str(arg):
-                if isinstance(arg, torch.Tensor):
-                    return "tensor(shape=%s, dtype=%s)" % (str(list(arg.shape)), str(arg.dtype))
-                return str(arg)
-            scope_name = self._ctx.current_module_name()# + ':' + layer.type.name
+            scope_name = self._ctx.current_module_name()
             self._layer_counts[scope_name] += 1
-            args = [arg_str(arg) for arg in self._ctx.method_args]
-            kwargs = ["%s=%s" % (key, arg_str(arg)) for key, arg in self._ctx.method_kwargs.items()]
             layer.name = scope_name + ':' + str(self._layer_counts[scope_name] - 1) + ':' + layer.type.name + ':' + device_type_str(device_type) 
             
             if orig_device_type != device_type:
                 layer.name = layer.name + '(' + device_type_str(orig_device_type) + ')'
-    #         "%s [%s #%d, %s] %s(%s)" % (self._ctx.current_module_name(), layer.type.name, self._layer_counts[layer.type.name], device_type_str(device_type),
-    #                                           self._ctx.method_str, ", ".join(args + kwargs))
     
         
     def __getattr__(self, name):
