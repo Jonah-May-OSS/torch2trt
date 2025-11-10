@@ -1,4 +1,3 @@
-import copy
 import torch
 
 
@@ -28,8 +27,8 @@ def _make_schema_from_value(value, condition=_default_condition, size=0):
         return None, size
 
 
-class Flattener(object):
-    
+class Flattener:
+
     def __init__(self, schema, size):
         self._schema = schema
         self._size = size
@@ -37,7 +36,7 @@ class Flattener(object):
     @staticmethod
     def from_value(value, condition=_default_condition):
         return Flattener(*_make_schema_from_value(value, condition))
-    
+
     @staticmethod
     def from_dict(x):
         return Flattener(x['schema'], x['size'])

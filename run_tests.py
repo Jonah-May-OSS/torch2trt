@@ -6,7 +6,7 @@ This provides an alternative to using pytest directly or the Makefile.
 Usage:
     python run_tests.py                    # Run all tests
     python run_tests.py --converters       # Run converter tests only
-    python run_tests.py --features         # Run feature tests only  
+    python run_tests.py --features         # Run feature tests only
     python run_tests.py --models           # Run model tests only
     python run_tests.py --coverage         # Run with coverage
     python run_tests.py --parallel         # Run in parallel
@@ -16,7 +16,6 @@ Usage:
 import argparse
 import subprocess
 import sys
-from pathlib import Path
 
 
 def main():
@@ -25,7 +24,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    
+
     parser.add_argument(
         "--converters",
         action="store_true",
@@ -68,9 +67,9 @@ def main():
         type=str,
         help="Run tests matching the given expression"
     )
-    
+
     args = parser.parse_args()
-    
+
     # Run linter if requested
     if args.lint:
         cmd = ["ruff", "check", "torch2trt/", "tests/", "run_tests.py"]
@@ -86,10 +85,10 @@ def main():
         except KeyboardInterrupt:
             print("\nLinting interrupted by user")
             sys.exit(130)
-    
+
     # Build pytest command
     cmd = ["pytest"]
-    
+
     # Determine test path
     if args.converters:
         cmd.append("tests/converter_tests/")
@@ -99,28 +98,28 @@ def main():
         cmd.append("tests/model_tests/")
     else:
         cmd.append("tests/")
-    
+
     # Add options
     if args.verbose:
         cmd.append("-v")
-    
+
     if args.parallel:
         cmd.extend(["-n", "auto"])
-    
+
     if args.coverage:
         cmd.extend([
             "--cov=torch2trt",
             "--cov-report=html",
             "--cov-report=term"
         ])
-    
+
     if args.filter:
         cmd.extend(["-k", args.filter])
-    
+
     # Run tests
     print(f"Running: {' '.join(cmd)}")
     print("-" * 80)
-    
+
     try:
         result = subprocess.run(cmd, check=False)
         sys.exit(result.returncode)

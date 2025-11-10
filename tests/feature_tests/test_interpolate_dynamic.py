@@ -1,10 +1,7 @@
-import pytest
 import torch
-import torch.nn.functional as F
-from torch2trt import (
-    torch2trt,
-    trt
-)
+import torch.nn.functional
+
+from torch2trt import torch2trt, trt
 
 
 def test_interpolate_dynamic_size():
@@ -12,7 +9,7 @@ def test_interpolate_dynamic_size():
     class TestModule(torch.nn.Module):
         def forward(self, x):
             size = x.size()
-            return F.interpolate(x, size=(size[2]*2, size[3]*3))
+            return torch.nn.functional.interpolate(x, size=(size[2]*2, size[3]*3))
 
     module = TestModule().cuda().eval()
 
@@ -24,7 +21,7 @@ def test_interpolate_dynamic_size():
 
     x = torch.randn(1, 3, 32, 32).cuda()
     assert(torch.allclose(module_trt(x), module(x), atol=1e-2, rtol=1e-2))
-    
+
     x = torch.randn(4, 3, 64, 64).cuda()
     assert(torch.allclose(module_trt(x), module(x), atol=1e-2, rtol=1e-2))
 
@@ -34,7 +31,7 @@ def test_interpolate_dynamic_shape():
     class TestModule(torch.nn.Module):
         def forward(self, x):
             size = x.shape
-            return F.interpolate(x, size=(size[2]*2, size[3]*3))
+            return torch.nn.functional.interpolate(x, size=(size[2]*2, size[3]*3))
 
     module = TestModule().cuda().eval()
 
@@ -46,6 +43,6 @@ def test_interpolate_dynamic_shape():
 
     x = torch.randn(1, 3, 32, 32).cuda()
     assert(torch.allclose(module_trt(x), module(x), atol=1e-2, rtol=1e-2))
-    
+
     x = torch.randn(4, 3, 64, 64).cuda()
     assert(torch.allclose(module_trt(x), module(x), atol=1e-2, rtol=1e-2))

@@ -1,6 +1,8 @@
-from .torch2trt import *
-from .converters import *
 import tensorrt as trt
+
+from .converters import *
+from .torch2trt import *
+
 
 def load_plugins():
     import torch2trt.torch_plugins
@@ -11,5 +13,5 @@ def load_plugins():
 
 try:
     load_plugins()
-except:
+except Exception:  # noqa: S110
     pass

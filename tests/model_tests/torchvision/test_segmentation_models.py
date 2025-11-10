@@ -1,11 +1,12 @@
 import torch
 import torchvision
+
 import torch2trt
 
 
 class ModelWrapper(torch.nn.Module):
     def __init__(self, model):
-        super(ModelWrapper, self).__init__()
+        super().__init__()
         self.model = model
     def forward(self, x):
         return self.model(x)['out']

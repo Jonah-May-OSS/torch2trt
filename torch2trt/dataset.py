@@ -1,9 +1,9 @@
-import os
-import torch
 import glob
-from uuid import uuid1
-from torch2trt.flattener import Flattener
+import os
 
+import torch
+
+from torch2trt.flattener import Flattener
 
 __all__ = [
     'DatasetRecorder',
@@ -13,7 +13,7 @@ __all__ = [
 ]
 
 
-class DatasetRecorder(object):
+class DatasetRecorder:
 
     def __init__(self, dataset, module):
         self.dataset = dataset
@@ -38,7 +38,7 @@ class DatasetRecorder(object):
         self.dataset.insert(input)
 
 
-class Dataset(object):
+class Dataset:
 
     def __len__(self):
         raise NotImplementedError
@@ -58,14 +58,14 @@ class Dataset(object):
     @property
     def flattener(self):
         if not hasattr(self, '_flattener') or self._flattener is None:
-            assert(len(self) > 0, 'Cannot create default flattener without input data.')
+            assert len(self) > 0, 'Cannot create default flattener without input data.'
             value = self[0]
             self._flattener = Flattener.from_value(value)
         return self._flattener
 
     def getitem_flat(self, index):
         return self.flattener.flatten(self[index])
-    
+
     def shapes_for_index(self, index, flat=False):
         shapes = [None for i in range(self.num_inputs())]
         tensors = self.getitem_flat(index)
@@ -97,7 +97,7 @@ class Dataset(object):
                 shape_tensor.append(tuple(si))
             shape_tensor = torch.LongTensor(shape_tensor)
             shapes.append(shape_tensor)
-        
+
         stat_shapes = []
         for shape in shapes:
             stat_shape = torch.Size(stat_fn(shape))
@@ -141,7 +141,7 @@ class ListDataset(Dataset):
     def __init__(self, items=None):
         if items is None:
             items = []
-        self.items = [t for t in items]
+        self.items = list(items)
 
     def __len__(self):
         return len(self.items)
@@ -185,9 +185,9 @@ class TensorBatchDataset(Dataset):
         else:
             if len(self.tensors) != len(tensors):
                 raise ValueError('Number of inserted tensors does not match the number of tensors in the current dataset.')
-            
+
             self.tensors = tuple([
-                torch.cat((self.tensors[index], tensors[index]), dim=0) 
+                torch.cat((self.tensors[index], tensors[index]), dim=0)
                 for index in range(len(tensors))
             ])
 
@@ -199,7 +199,7 @@ class FolderDataset(Dataset):
         if not os.path.exists(folder):
             os.makedirs(folder)
         self.folder = folder
-    
+
     def file_paths(self):
         return sorted(glob.glob(os.path.join(self.folder, '*.pth')))
 
@@ -212,6 +212,6 @@ class FolderDataset(Dataset):
     def insert(self, tensors):
         i = 0
         file_paths = [os.path.basename(path) for path in self.file_paths()]
-        while ('input_%d.pth' % i) in file_paths:
+        while f'input_{i}.pth' in file_paths:
             i += 1
-        torch.save(tensors, os.path.join(self.folder, 'input_%d.pth' % i))
+        torch.save(tensors, os.path.join(self.folder, f'input_{i}.pth'))

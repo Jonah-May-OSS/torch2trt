@@ -1,6 +1,4 @@
-import torch
 import torch.nn as nn
-from .flattener import Flattener
 
 
 class Unflatten(nn.Module):

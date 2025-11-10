@@ -1,28 +1,21 @@
-import torch
-import tensorrt as trt
-import numpy as np
-from collections import defaultdict
 import importlib
+from collections import defaultdict
 
+import numpy as np
+import tensorrt as trt
+import torch
+
+from .dataset import Dataset, ListDataset
 from .dataset_calibrator import (
-    DatasetCalibrator,
     DEFAULT_CALIBRATION_ALGORITHM,
+    DatasetCalibrator,
 )
-
-from .dataset import (
-    Dataset,
-    ListDataset
-)
-
-from .flattener import Flattener
 from .flatten_module import Flatten
-from .version_utils import trt_version
+from .flattener import Flattener
+from .misc_utils import torch_device_to_trt, torch_dtype_to_trt, trt_int_dtype
 from .trt_module import TRTModule
-from .misc_utils import (
-    torch_device_to_trt,
-    torch_dtype_to_trt,
-    trt_int_dtype
-)
+from .version_utils import trt_version
+
 # UTILITY FUNCTIONS
 
 def trt_num_inputs(engine):
@@ -60,7 +53,7 @@ def torch_dim_to_trt_axes(dim):
     # create axes bitmask for reduce layer
     axes = 0
     for d in dim:
-        axes |= 1 << d 
+        axes |= 1 << d
 
     return axes
 
@@ -270,7 +263,7 @@ def attach_converter(ctx, method, converter, method_str):
     return wrapper
 
 
-class ConversionHook(object):
+class ConversionHook:
     """Attaches TensorRT converter to PyTorch method call"""
 
     def __init__(self, ctx, key, converter):
@@ -279,8 +272,8 @@ class ConversionHook(object):
         self.converter = converter
 
     def _set_method(self, method):
-        module = self.converter['module']
-        exec('module.%s = method' % self.converter['qual_name'])
+        self.converter['module']
+        exec('module.{} = method'.format(self.converter['qual_name']))
 
     def __enter__(self):
         self._set_method(
@@ -293,10 +286,10 @@ class ConversionHook(object):
         self._set_method(self.converter['method_impl'])
 
 def default_input_names(num_inputs):
-    return ["input_%d" % i for i in range(num_inputs)]
+    return [f"input_{i}" for i in range(num_inputs)]
 
 def default_output_names(num_outputs):
-    return ["output_%d" % i for i in range(num_outputs)]
+    return [f"output_{i}" for i in range(num_outputs)]
 
 
 def device_type_str(device_type):
@@ -304,9 +297,9 @@ def device_type_str(device_type):
         return 'GPU'
     elif device_type == trt.DeviceType.DLA:
         return 'DLA'
-    
 
-class NetworkWrapper(object):
+
+class NetworkWrapper:
     def __init__(self, ctx, network):
         self._ctx = ctx
         self._network = network
@@ -314,7 +307,7 @@ class NetworkWrapper(object):
 
     def _configure_layer(self, layer):
         with use_shape_wrapping(False):
-        
+
             # set layer device type
             device_type = self._ctx.current_device_type()
             self._ctx.builder_config.set_device_type(layer, device_type)
@@ -322,24 +315,24 @@ class NetworkWrapper(object):
             if device_type == trt.DeviceType.DLA and not self._ctx.builder_config.can_run_on_DLA(layer):
                 if self._ctx.torch2trt_kwargs['gpu_fallback']:
                     device_type = trt.DeviceType.GPU  # layer will fall back to GPU
-            
+
             # set layer name
             def arg_str(arg):
                 if isinstance(arg, torch.Tensor):
-                    return "tensor(shape=%s, dtype=%s)" % (str(list(arg.shape)), str(arg.dtype))
+                    return f"tensor(shape={str(list(arg.shape))}, dtype={str(arg.dtype)})"
                 return str(arg)
             scope_name = self._ctx.current_module_name()# + ':' + layer.type.name
             self._layer_counts[scope_name] += 1
-            args = [arg_str(arg) for arg in self._ctx.method_args]
-            kwargs = ["%s=%s" % (key, arg_str(arg)) for key, arg in self._ctx.method_kwargs.items()]
-            layer.name = scope_name + ':' + str(self._layer_counts[scope_name] - 1) + ':' + layer.type.name + ':' + device_type_str(device_type) 
-            
+            [arg_str(arg) for arg in self._ctx.method_args]
+            [f"{key}={arg_str(arg)}" for key, arg in self._ctx.method_kwargs.items()]
+            layer.name = scope_name + ':' + str(self._layer_counts[scope_name] - 1) + ':' + layer.type.name + ':' + device_type_str(device_type)
+
             if orig_device_type != device_type:
                 layer.name = layer.name + '(' + device_type_str(orig_device_type) + ')'
     #         "%s [%s #%d, %s] %s(%s)" % (self._ctx.current_module_name(), layer.type.name, self._layer_counts[layer.type.name], device_type_str(device_type),
     #                                           self._ctx.method_str, ", ".join(args + kwargs))
-    
-        
+
+
     def __getattr__(self, name):
         attr = getattr(self._network, name)
         if callable(attr):
@@ -361,8 +354,8 @@ def get_conversion_context():
     return _ACTIVE_CONVERSION_CONTEXT
 
 
-class ConversionContext(object):
-    
+class ConversionContext:
+
     def __init__(self, network, converters=CONVERTERS, torch2trt_kwargs=None, builder_config=None, logger=None):
         self.network = NetworkWrapper(self, network)
         self.lock = False
@@ -375,7 +368,7 @@ class ConversionContext(object):
             ConversionHook(self, key, converter)
             for key, converter in converters.items()
         ]
-        
+
         self.module_stack = []
         self.module_handles = []
         self.device_type_stack = []
@@ -386,58 +379,58 @@ class ConversionContext(object):
 
     def current_module_name(self):
         return self.get_module_name(self.current_module())
-    
+
     def current_module(self):
         return self.module_stack[-1]
-    
+
     def get_module_name(self, module):
         return self.module_name_map[module]
-    
+
     def _module_pre_hook(self, module, input):
         # TODO(@jwelsh): add logging to show module entry / exit
         self.module_stack.append(module)
-        
+
         # hook that is attached to modulee using register_forward_pre_hook, which is called before module is executed
         if module in self.torch2trt_kwargs['device_types']:
             device_type = self.torch2trt_kwargs['device_types'][module]
             self.device_type_stack.append((module, device_type))
-        
+
     def _module_post_hook(self, module, input, output):
-        
+
         # if module was used to set the current device type, pop device type from stack
         if self.current_device_type_module() == module:
             self.device_type_stack.pop()
-            
+
         self.module_stack.pop()
-        
+
     def current_device_type(self):
         """Returns the current device type"""
         if len(self.device_type_stack) > 0:
             return self.device_type_stack[-1][1]
         else:
             return self.torch2trt_kwargs['default_device_type']
-        
+
     def current_device_type_module(self):
         """Returns the module which controls the current device type"""
         if len(self.device_type_stack) > 0:
             return self.device_type_stack[-1][0]
         else:
             return None
-        
+
     def __enter__(self):
         global _ACTIVE_CONVERSION_CONTEXT
-        
+
         # attach hooks which add converters to methods
         for hook in self.hooks:
             hook.__enter__()
-        
+
         # attach hooks which control the current device type
-        for name, module in self.torch2trt_kwargs['module'].named_modules():
+        for _name, module in self.torch2trt_kwargs['module'].named_modules():
             pre_hook_handle = module.register_forward_pre_hook(self._module_pre_hook)
             post_hook_handle = module.register_forward_hook(self._module_post_hook)
             self.module_handles.append(pre_hook_handle)
             self.module_handles.append(post_hook_handle)
-            
+
         _ACTIVE_CONVERSION_CONTEXT = self
 
         torch.Tensor.size = _size_wrapper
@@ -447,7 +440,7 @@ class ConversionContext(object):
 
     def __exit__(self, type, val, tb):
         global _ACTIVE_CONVERSION_CONTEXT
-        
+
 
         for hook in self.hooks:
             hook.__exit__(type, val, tb)
@@ -469,9 +462,9 @@ class ConversionContext(object):
         for i, torch_input in enumerate(torch_inputs):
 
             if not hasattr(torch_input, "_trt"):
-                
+
                 shape = list(torch_input.shape)
-                
+
                 if dynamic_axes is not None:
                     for dim in dynamic_axes[i]:
                         shape[dim] = -1
@@ -526,7 +519,7 @@ def torch2trt(module,
               default_device_type=trt.DeviceType.GPU,
               dla_core=0,
               gpu_fallback=True,
-              device_types={},
+              device_types=None,
               min_shapes=None,
               max_shapes=None,
               opt_shapes=None,
@@ -536,9 +529,11 @@ def torch2trt(module,
               **kwargs):
 
     # capture arguments to provide to context
+    if device_types is None:
+        device_types = {}
     kwargs.update(locals())
     kwargs.pop('kwargs')
-        
+
     # handle inputs as dataset of list of tensors
     if issubclass(inputs.__class__, Dataset):
         dataset = inputs
@@ -565,7 +560,7 @@ def torch2trt(module,
         max_shapes_flat = [tuple(t) for t in dataset.max_shapes(flat=True)]
     else:
         max_shapes_flat = input_flattener.flatten(max_shapes)
-    
+
     if opt_shapes is None:
         opt_shapes_flat = [tuple(t) for t in dataset.median_numel_shapes(flat=True)]
     else:
@@ -577,7 +572,7 @@ def torch2trt(module,
         max_shapes_flat = [(max_batch_size,) + s[1:] for s in max_shapes_flat]
 
     dynamic_axes_flat = infer_dynamic_axes(min_shapes_flat, max_shapes_flat)
-    
+
     if default_device_type == trt.DeviceType.DLA:
         for value in dynamic_axes_flat:
             if len(value) > 0:
@@ -593,10 +588,11 @@ def torch2trt(module,
         output_names = default_output_names(output_flattener.size)
 
     if use_onnx:
-        import onnx_graphsurgeon as gs
-        import onnx
-        import tempfile
         import os
+        import tempfile
+
+        import onnx
+        import onnx_graphsurgeon as gs
 
         module_flat = Flatten(module, input_flattener, output_flattener)
         inputs_flat = input_flattener.flatten(inputs)
@@ -604,17 +600,17 @@ def torch2trt(module,
         # Export, optimize, and parse ONNX via a temp directory (auto-cleaned)
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_in_path = os.path.join(tmpdir, "model_in.onnx")
-            export_args = dict(
-                model=module_flat,
-                args=inputs_flat,
-                f=tmp_in_path,
-                input_names=input_names,
-                output_names=output_names,
-                dynamic_axes={
+            export_args = {
+                "model": module_flat,
+                "args": inputs_flat,
+                "f": tmp_in_path,
+                "input_names": input_names,
+                "output_names": output_names,
+                "dynamic_axes": {
                     name: {int(axis): f"input_{index}_axis_{axis}" for axis in dynamic_axes_flat[index]}
                     for index, name in enumerate(input_names)
                 },
-            )
+            }
             if onnx_opset is not None:
                 export_args["opset_version"] = onnx_opset
             torch.onnx.export(**export_args)
@@ -645,7 +641,7 @@ def torch2trt(module,
     else:
         network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
         with ConversionContext(network, torch2trt_kwargs=kwargs, builder_config=config, logger=logger) as ctx:
-            
+
             inputs_flat = input_flattener.flatten(inputs)
 
             ctx.add_inputs(inputs_flat, input_names, dynamic_axes=dynamic_axes_flat)
@@ -658,7 +654,7 @@ def torch2trt(module,
     # set max workspace size
     if trt_version() < "10.0":
         config.max_workspace_size = max_workspace_size
-    
+
 
     # set number of avg timing itrs.
     if avg_timing_iterations is not None:
@@ -671,7 +667,7 @@ def torch2trt(module,
     if gpu_fallback:
         config.set_flag(trt.BuilderFlag.GPU_FALLBACK)
     config.DLA_core = dla_core
-    
+
     if strict_type_constraints:
         config.set_flag(trt.BuilderFlag.STRICT_TYPES)
 
@@ -735,13 +731,15 @@ def get_module_qualname(name):
             continue
         except ImportError as e:
             # Surface unexpected import issues
-            raise RuntimeError("Failed to parse ONNX model. " + e.msg)
+            raise RuntimeError("Failed to parse ONNX model. " + e.msg) from e
 
     raise RuntimeError("Could not import module")
 
 
-def tensorrt_converter(method, is_real=True, enabled=True, imports=[]):
+def tensorrt_converter(method, is_real=True, enabled=True, imports=None):
 
+    if imports is None:
+        imports = []
     if isinstance(method, str):
         module, module_name, qual_name = get_module_qualname(method)
     else:
@@ -749,7 +747,7 @@ def tensorrt_converter(method, is_real=True, enabled=True, imports=[]):
 
     try:
         # No deepcopy needed; store original callable
-        method_impl = eval('module.%s' % qual_name)
+        method_impl = eval(f'module.{qual_name}')
     except AttributeError:
         enabled = False
 
@@ -806,7 +804,7 @@ _int_sub = int.__sub__
 _int_floordiv = int.__floordiv__
 
 class IntWrapper(int):
-    
+
     @property
     def _trt(self):
         if not hasattr(self, '_raw_trt'):
@@ -948,15 +946,18 @@ def _new_getattr(self, name):
     else:
         return _old_getattr(self, name)
 
-class use_shape_wrapping:
+class UseShapeWrapping:  # noqa: N801
 
     stack = [True] # default true
 
     def __init__(self, value: bool):
         self._value = value
-    
+
     def __enter__(self, *args, **kwargs):
         self.stack.insert(0, self._value)
 
     def __exit__(self, *args, **kwargs):
         self.stack.pop(0)
+
+# Backward compatibility alias
+use_shape_wrapping = UseShapeWrapping

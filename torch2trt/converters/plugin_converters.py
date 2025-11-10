@@ -1,9 +1,9 @@
-import torch
-import torch.nn as nn
-from torch2trt.torch2trt import *
-import numpy as np
 import ctypes
 
+import numpy as np
+import torch.nn as nn
+
+from torch2trt.torch2trt import *
 
 try:
     ctypes.CDLL('libtorch2trt_plugins.so')
@@ -52,5 +52,5 @@ try:
         layer = ctx.network.add_plugin_v2([input_trt], plugin)
         output._trt = layer.get_output(0)
 
-except:
+except Exception:  # noqa: S110
     pass

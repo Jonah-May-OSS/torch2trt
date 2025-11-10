@@ -1,12 +1,9 @@
-import pytest
+from tempfile import mkdtemp
+
 import torch
 import torch.nn as nn
-from torch2trt.dataset import (
-    TensorBatchDataset,
-    ListDataset,
-    FolderDataset
-)
-from tempfile import mkdtemp
+
+from torch2trt.dataset import FolderDataset, ListDataset, TensorBatchDataset
 
 
 def test_dataset_shapes():
@@ -39,7 +36,7 @@ def test_dataset_infer_dynamic_axes():
     dataset.insert((torch.randn(1, 3, 48, 48), torch.randn(1, 6)))
 
     dynamic_axes = dataset.infer_dynamic_axes()
-    
+
     assert(dynamic_axes[0] == [2, 3])
     assert(dynamic_axes[1] == [1])
 
@@ -66,7 +63,7 @@ def test_tensor_batch_dataset_record():
     module = TestModule().cuda().eval()
 
     with dataset.record(module):
-        for i in range(5):
+        for _i in range(5):
             module(*inputs)
 
     assert(len(dataset) == 5)
@@ -97,7 +94,7 @@ def test_list_dataset_record():
     module = TestModule().cuda().eval()
 
     with dataset.record(module):
-        for i in range(5):
+        for _i in range(5):
             module(*inputs)
 
     assert(len(dataset) == 5)
@@ -130,7 +127,7 @@ def test_folder_dataset_record():
     module = TestModule().to(device).eval()
 
     with dataset.record(module):
-        for i in range(5):
+        for _i in range(5):
             module(*inputs)
 
     assert(len(dataset) == 5)

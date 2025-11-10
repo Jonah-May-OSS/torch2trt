@@ -1,5 +1,4 @@
 import graphviz
-import tensorrt as trt
 
 
 def trt_network_to_dot_graph(network):

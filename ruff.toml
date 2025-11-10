@@ -29,7 +29,9 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
-"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
+"__init__.py" = ["F401", "F403"]  # Allow unused imports and star imports in __init__.py
+"torch2trt/converters/*.py" = ["F403", "F405"]  # Allow star imports in converters
+"torch2trt/contrib/**/*.py" = ["F403", "F405", "N999", "N802", "N812", "N817"]  # Allow star imports, module names, and naming conventions in contrib
 
 [format]
 # Use single quotes

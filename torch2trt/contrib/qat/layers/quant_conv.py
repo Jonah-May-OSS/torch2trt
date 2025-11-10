@@ -1,19 +1,19 @@
 """
-Original source code taken from nvidia quantization library. 
+Original source code taken from nvidia quantization library.
 Changes made to correctly map quantized pytorch layers to TensorRT layers at INT8
 
-Original source: tools/pytorch_quantization/pytorch_quantization/nn/modules/quant_conv.py under 
+Original source: tools/pytorch_quantization/pytorch_quantization/nn/modules/quant_conv.py under
 https://github.com/NVIDIA/TensorRT.git
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.modules.conv import _ConvTransposeNd
 from pytorch_quantization import tensor_quant
+from torch.nn.modules.utils import _pair
 
 from . import _utils
+
 
 class _QuantConvNd(torch.nn.modules.conv._ConvNd, _utils.QuantWeightMixin):
     """base class of quantized Conv inherited from _ConvNd
@@ -38,7 +38,7 @@ class _QuantConvNd(torch.nn.modules.conv._ConvNd, _utils.QuantWeightMixin):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride, padding, dilation, transposed, output_padding,
                  groups, bias, padding_mode, quant_desc_weight):
-        super(_QuantConvNd, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation,
+        super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation,
                                            transposed, output_padding, groups, bias, padding_mode)
         self.init_quantizer(quant_desc_weight)
 
@@ -83,7 +83,7 @@ class QuantConv2d(_QuantConvNd):
         dilation = _pair(dilation)
 
         quant_desc_weight = _utils.pop_quant_desc_in_kwargs(self.__class__,weight_only=True, **kwargs)
-        super(QuantConv2d, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, False,
+        super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, False,
                                           _pair(0), groups, bias, padding_mode,quant_desc_weight=quant_desc_weight)
 
     def forward(self, input):
@@ -98,7 +98,7 @@ class QuantConv2d(_QuantConvNd):
                               _pair(0), self.dilation, self.groups)
         else:
             output = F.conv2d(input, quant_weight, self.bias, self.stride, self.padding, self.dilation,self.groups)
-	
+
         return output
 
 class QuantConvBN2d(_QuantConvNd):
@@ -125,7 +125,7 @@ class QuantConvBN2d(_QuantConvNd):
         dilation = _pair(dilation)
 
         quant_desc_weight = _utils.pop_quant_desc_in_kwargs(self.__class__,weight_only=True, **kwargs)
-        super(QuantConvBN2d, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, False,
+        super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, False,
                                           _pair(0), groups, bias, padding_mode,quant_desc_weight=quant_desc_weight)
 
         eps = kwargs.pop('eps',1e-5)
@@ -136,7 +136,7 @@ class QuantConvBN2d(_QuantConvNd):
         self.register_buffer('folded_weight',torch.ones_like(self.weight))
         self.register_buffer('folded_bias',torch.ones_like(self.bn.running_mean))
 
-    
+
     def _fold_BN(self,conv_w,conv_b,bn_rm,bn_rv,eps,bn_w,bn_b):
         '''
         conv_w, conv_b = conv weight and bias
@@ -169,7 +169,7 @@ class QuantConvBN2d(_QuantConvNd):
                               _pair(0), self.dilation, self.groups)
         else:
             output = F.conv2d(input, quant_weight, folded_bias, self.stride, self.padding, self.dilation,self.groups)
-	
+
         return output
 
 
@@ -202,7 +202,7 @@ class IQuantConvBN2d(torch.nn.Conv2d,_utils.QuantMixinWeight):
 
     def __repr__(self):
         s = super().__repr__()
-        s = "(" + s + "dynamic_range amax {0:.4f})".format(self._weight_quantizer.learned_amax)
+        s = "(" + s + f"dynamic_range amax {self._weight_quantizer.learned_amax:.4f})"
         return s
 
     def forward(self,inputs):
@@ -229,7 +229,7 @@ class IQuantConv2d(torch.nn.Conv2d,_utils.QuantMixinWeight):
         self.init_quantizer()
 
     def forward(self,inputs):
-        return super(IQuantConv2d, self).forward(inputs)
+        return super().forward(inputs)
 
 #class QuantConv2d(torch.nn.Conv2d,_utils.QuantMixin):
 #    '''

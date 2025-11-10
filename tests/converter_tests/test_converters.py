@@ -1,26 +1,27 @@
 import pytest
 import torch
-import torch2trt
 import torch.nn as nn
+
+import torch2trt
 from torch2trt.flattener import Flattener
 
 
 def cross_validate(
-        module, 
+        module,
         inputs,
         fp16_mode: bool,
         tol: float
     ):
 
     module = module
-    
+
 
     module_trt = torch2trt.torch2trt(
         module,
         inputs,
         fp16_mode=fp16_mode
     )
-    
+
     output = module(*inputs)
     output_trt = module_trt(*inputs)
 
@@ -31,28 +32,28 @@ def cross_validate(
 
     for output_tensor, output_tensor_trt in zip(output, output_trt):
         assert torch.allclose(
-            output_tensor, output_tensor_trt, 
+            output_tensor, output_tensor_trt,
         atol=tol, rtol=tol)
 
 
 
 # MODULES
-    
+
 
 class UnaryModule(torch.nn.Module):
     def __init__(self, fn):
-        super(UnaryModule, self).__init__()
+        super().__init__()
         self.fn = fn
-        
+
     def forward(self, x):
         return self.fn(x)
 
 
 class BinaryModule(torch.nn.Module):
     def __init__(self, fn):
-        super(BinaryModule, self).__init__()
+        super().__init__()
         self.fn = fn
-        
+
     def forward(self, a, b):
         return self.fn(a, b)
 # TESTS
@@ -95,7 +96,7 @@ def test_softplus(fp16_mode, tol):
 
 
 @pytest.mark.parametrize("output_size,fp16_mode,tol", [
-    ((1, 1), False, 1e-1), 
+    ((1, 1), False, 1e-1),
     ((2, 2), False, 1e-1),
     ((1, 1), True, 1e-1)
 ])
@@ -106,8 +107,8 @@ def test_adaptive_avg_pool2d(output_size, fp16_mode, tol):
 
 
 @pytest.mark.parametrize("output_size,fp16_mode,tol", [
-    ((1, 1, 1), False, 1e-1), 
-    ((2, 2, 2), False, 1e-1), 
+    ((1, 1, 1), False, 1e-1),
+    ((2, 2, 2), False, 1e-1),
     ((1, 1, 1), True, 1e-1)
 ])
 def test_adaptive_avg_pool3d(output_size, fp16_mode, tol):
@@ -117,7 +118,7 @@ def test_adaptive_avg_pool3d(output_size, fp16_mode, tol):
 
 
 @pytest.mark.parametrize("output_size,fp16_mode,tol", [
-    ((1, 1), False, 1e-1), 
+    ((1, 1), False, 1e-1),
     ((2, 2), False, 1e-1),
     ((1, 1), True, 1e-1)
 ])
@@ -128,8 +129,8 @@ def test_adaptive_max_pool2d(output_size, fp16_mode, tol):
 
 
 @pytest.mark.parametrize("output_size,fp16_mode,tol", [
-    ((1, 1, 1), False, 1e-1), 
-    ((2, 2, 2), False, 1e-1), 
+    ((1, 1, 1), False, 1e-1),
+    ((2, 2, 2), False, 1e-1),
     ((1, 1, 1), True, 1e-1)
 ])
 def test_adaptive_max_pool3d(output_size, fp16_mode, tol):
@@ -153,7 +154,7 @@ def test_torch_add():
 def test_iadd():
     class IAdd(torch.nn.Module):
         def __init__(self):
-            super(IAdd, self).__init__()
+            super().__init__()
 
         def forward(self, x, y):
             x += y
@@ -177,7 +178,7 @@ def test_radd_float():
 
 
 # TODO: radd, add, iadd
-    
+
 
 @pytest.mark.parametrize("with_conv", [True, False])
 @pytest.mark.parametrize("nd", [1,2,3])
@@ -219,7 +220,7 @@ def test_chunk(chunks, dim):
     module = UnaryModule(lambda x: torch.chunk(x, chunks, dim)).cuda().eval()
     inputs = [torch.randn(1, 3, 3).cuda()]
     cross_validate(module, inputs, fp16_mode=False, tol=1e-1)
-    
+
 
 @pytest.mark.parametrize("split_sections_or_size,dim", [
     (1, 1),
@@ -247,7 +248,7 @@ def test_clone():
     module = UnaryModule(lambda x: x.clone()).cuda().eval()
     inputs = [torch.randn(1, 8, 8).cuda()]
     cross_validate(module, inputs, fp16_mode=False, tol=1e-1)
-    
+
 
 def test_gt():
     module = BinaryModule(lambda x, y: x > y).cuda().eval()
@@ -385,7 +386,7 @@ def test_div():
 def test_div_scalar(val):
     module = UnaryModule(lambda x: x / val).cuda().eval()
     inputs = [torch.randn(1, 4, 4).cuda()]
-    
+
     cross_validate(module, inputs, fp16_mode=False, tol=1e-1)
 
 @pytest.mark.parametrize(
@@ -412,7 +413,7 @@ def test_einsum_binary(einsum_expr):
 
 
 @pytest.mark.parametrize(
-    "sizes", 
+    "sizes",
     [
         (3, 4),
         (-1, 4)
@@ -496,7 +497,7 @@ def test_instance_norm(nd, num_channels):
     shape = [1, num_channels] + [4] * nd
     inputs = [torch.randn(*shape).cuda()]
     cross_validate(module, inputs, fp16_mode=False, tol=1e-1)
-    
+
 
 @pytest.mark.parametrize(
     "input_size,output_size,scale_factor,mode,align_corners",
@@ -512,14 +513,14 @@ def test_instance_norm(nd, num_channels):
         ((4, 4, 4), None, 2, "trilinear", None)
 ])
 def test_interpolate_size(input_size, output_size, scale_factor, mode, align_corners):
-    
+
 
     module = UnaryModule(lambda x: torch.nn.functional.interpolate(
         x, size=output_size, mode=mode,
         align_corners=align_corners,
         scale_factor=scale_factor
     )).cuda().eval()
-    
+
     input_size = [1, 3] + list(input_size)
     inputs = [torch.randn(*input_size).cuda()]
     cross_validate(module, inputs, fp16_mode=False, tol=1e-1)
@@ -558,7 +559,7 @@ def test_matmul(shape_a, shape_b):
     module = BinaryModule(lambda x, y: torch.matmul(x, y)).cuda().eval()
 
     inputs = [torch.randn(*shape_a).cuda(), torch.randn(*shape_b).cuda()]
-    
+
     cross_validate(module, inputs, fp16_mode=False, tol=1e-1)
 
 
@@ -603,11 +604,14 @@ def test_avg_pool_nd(nd, kernel_size, stride, padding, ceil_mode, count_include_
 @pytest.mark.parametrize("op", ["min","max", "fmod"])
 def test_binary_op_elementwise(op):
     if op == "max":
-        fn = lambda x, y: torch.max(x, y)
+        def fn(x, y):
+            return torch.max(x, y)
     elif op == "min":
-        fn = lambda x, y: torch.min(x, y)
+        def fn(x, y):
+            return torch.min(x, y)
     elif op == "fmod":
-        fn = lambda x, y: torch.fmod(x, y)
+        def fn(x, y):
+            return torch.fmod(x, y)
 
 
     module = BinaryModule(fn).cuda().eval()
@@ -741,7 +745,7 @@ def test_normalize(p, dim):
     module = UnaryModule(lambda x: torch.nn.functional.normalize(x, p, dim)).cuda().eval()
     inputs = [torch.zeros(1, 3, 3).cuda()]
     cross_validate(module, inputs, fp16_mode=False, tol=1e-1)
-    
+
 
 @pytest.mark.parametrize("pad,mode,value", [
     ((1, 1), "constant", 0.),
@@ -756,7 +760,7 @@ def test_pad(pad, mode, value):
     ).cuda().eval()
     inputs = [torch.randn(3, 3, 4, 2).cuda()]
     cross_validate(module, inputs, fp16_mode=False, tol=1e-1)
-    
+
 
 @pytest.mark.parametrize("permutation", [
     (0, 2, 1),
@@ -781,16 +785,19 @@ def test_permute(permutation):
 @pytest.mark.parametrize("scalar", [2, 2.])
 def test_scalar_op(op, scalar):
     if op == "torch.pow":
-        fn = lambda x: torch.pow(x, scalar)
+        def fn(x):
+            return torch.pow(x, scalar)
     elif op == "torch.Tensor.__ipow__":
         def ipow(x):
             x **= scalar
             return x
         fn = ipow
     elif op == "torch.Tensor.__pow__":
-        fn = lambda x: x ** scalar
+        def fn(x):
+            return x ** scalar
     elif op == "torch.Tensor.__rpow__":
-        fn = lambda x: scalar ** x
+        def fn(x):
+            return scalar ** x
 
 
     module = UnaryModule(fn).cuda().eval()

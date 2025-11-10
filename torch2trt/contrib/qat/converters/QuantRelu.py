@@ -1,5 +1,7 @@
-from torch2trt.torch2trt import *
 import tensorrt as trt
+
+from torch2trt.torch2trt import *
+
 
 @tensorrt_converter('torch2trt.contrib.qat.layers.quant_activation.IQuantReLU.forward',enabled=trt_version() >= '7.0')
 def convert_QuantReLU(ctx):
@@ -9,7 +11,7 @@ def convert_QuantReLU(ctx):
     output = ctx.method_return
     layer = ctx.network.add_activation(
         input=input_trt, type=trt.ActivationType.RELU)
-    
+
     ## int 8 precision
     if 'qat_mode' in ctx.torch2trt_kwargs:
         amax = module._input_quantizer.learned_amax
