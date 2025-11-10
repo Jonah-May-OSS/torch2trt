@@ -50,6 +50,7 @@ jobs:
         
     - name: Install torch2trt
       run: |
+        pip install -e ./requirements/requirements_10.txt
         pip install -e .
         
     - name: Check CUDA availability
