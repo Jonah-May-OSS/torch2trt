@@ -140,6 +140,23 @@ bash build_contrib.sh
 This enables you to run the QAT example located [here](examples/contrib/quantization_aware_training).   
     
 
+## Testing
+
+torch2trt includes a comprehensive test suite. To run tests:
+
+```bash
+# Install test dependencies
+pip install -r requirements-test.txt
+
+# Run all tests
+pytest tests/
+
+# Or use the Makefile
+make test
+```
+
+For detailed testing instructions, see [TESTING.md](TESTING.md).
+
 ## How does it work?
 
 This converter works by attaching conversion functions (like ``convert_ReLU``) to the original 

@@ -20,3 +20,14 @@ site
 ToJetsonGrp
 .vscode
 data
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+*.cover
+.hypothesis/
+.test_model.pth
+test_output.md
+*.log
