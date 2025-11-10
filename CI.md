@@ -11,34 +11,44 @@ The main test workflow runs automatically on:
 
 ## Workflow Details
 
-### Test Matrix
+### Test Jobs
 
+The workflow includes two separate test jobs:
+
+#### 1. CPU Tests (ubuntu-latest)
 Tests run on multiple Python versions:
 - Python 3.8
 - Python 3.9
 - Python 3.10
 - Python 3.11
+- Python 3.13
 
-### Test Execution
-
-Due to the dependency on CUDA and TensorRT, the CI environment runs with CPU-only PyTorch and executes a limited subset of tests:
+Due to the dependency on CUDA and TensorRT, this job runs with CPU-only PyTorch and executes a limited subset of tests:
 - Version utility tests
 - Flattener tests
 - Dataset tests
 
 These tests verify basic functionality without requiring GPU hardware.
 
-### Full Test Suite
+#### 2. GPU Tests (self-hosted)
+Runs on a self-hosted runner with GPU/CUDA/TensorRT support:
+- Uses Python 3.13
+- Runs the complete test suite including:
+  - Converter tests (require TensorRT)
+  - Model conversion tests (require CUDA)
+  - Feature tests (full coverage)
+  - Performance benchmarks (require GPU)
+- Generates coverage reports
+- Only runs on the main repository (not forks)
 
-For comprehensive testing including:
-- Converter tests (require TensorRT)
-- Model conversion tests (require CUDA)
-- Performance benchmarks (require GPU)
+### Requirements for Self-Hosted Runner
 
-Tests should be run on a system with:
+The self-hosted runner must have:
 - NVIDIA GPU
-- CUDA Toolkit
+- CUDA Toolkit installed
 - TensorRT installed
+- Python 3.13+
+- GitHub Actions runner configured
 
 See [TESTING.md](TESTING.md) for complete testing instructions.
 
