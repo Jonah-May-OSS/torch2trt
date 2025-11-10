@@ -48,6 +48,37 @@ End-to-end tests for complete model conversions:
 
 ## Running Tests
 
+### Quick Start
+
+There are three ways to run tests:
+
+**1. Using the Python test runner (simplest):**
+```bash
+# Run all tests
+python run_tests.py
+
+# Run specific categories
+python run_tests.py --converters
+python run_tests.py --features
+python run_tests.py --models
+
+# Run with coverage
+python run_tests.py --coverage
+
+# Run in parallel
+python run_tests.py --parallel
+```
+
+**2. Using pytest directly:**
+```bash
+pytest tests/
+```
+
+**3. Using the Makefile:**
+```bash
+make test
+```
+
 ### Run All Tests
 
 ```bash
