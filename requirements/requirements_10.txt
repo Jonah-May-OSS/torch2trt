@@ -1,4 +1,4 @@
-tensorrt==10.0.1
+tensorrt==10.14.1
 torch
 torchvision
 timm
