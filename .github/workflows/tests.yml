@@ -40,18 +40,15 @@ jobs:
         ruff check torch2trt/ tests/ run_tests.py
       continue-on-error: false
         
-    - name: Install PyTorch and torchvision
+    - name: Install dependencies
       run: |
         pip install torch torchvision
-        
-    - name: Install other dependencies
-      run: |
         pip install timm
+        pip install -r ./requirements/requirements_10.txt
+        pip install -r requirements-test.txt
         
     - name: Install torch2trt
       run: |
-        pip install -r ./requirements/requirements_10.txt
-        pip install -r requirements-test.txt
         pip install -e .
         
     - name: Check CUDA availability
