@@ -13,9 +13,6 @@ def cross_validate(
         tol: float
     ):
 
-    module = module
-
-
     module_trt = torch2trt.torch2trt(
         module,
         inputs,
