@@ -272,7 +272,7 @@ class ConversionHook:
         self.converter = converter
 
     def _set_method(self, method):
-        self.converter['module']
+        module = self.converter['module']  # noqa: F841 - used in exec() below
         exec('module.{} = method'.format(self.converter['qual_name']))
 
     def __enter__(self):
