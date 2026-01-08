@@ -1,12 +1,9 @@
-import pytest
 import tensorrt as trt
 import torch
 import torch.nn as nn
-from torch2trt.dataset import (
-    TensorBatchDataset,
-    ListDataset
-)
+
 from torch2trt import torch2trt
+from torch2trt.dataset import ListDataset, TensorBatchDataset
 
 
 def test_dataset_calibrator_batch_dataset():
@@ -34,9 +31,9 @@ def test_dataset_calibrator_batch_dataset():
     dataset = TensorBatchDataset()
 
     with dataset.record(module):
-        for i in range(50):
+        for _i in range(50):
             module(*inputs)
-    
+
     module_trt = torch2trt(
         module,
         dataset[0],
@@ -80,9 +77,9 @@ def test_dataset_calibrator_list_dataset():
     dataset = ListDataset()
 
     with dataset.record(module):
-        for i in range(50):
+        for _i in range(50):
             module(*inputs)
-    
+
     module_trt = torch2trt(
         module,
         dataset[0],

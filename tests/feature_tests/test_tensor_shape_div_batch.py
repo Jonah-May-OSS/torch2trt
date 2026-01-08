@@ -1,12 +1,13 @@
-import pytest
 import torch
+
 from torch2trt import torch2trt, trt
-    
+
+
 def test_div_constant_batch():
 
     class DivConstantBatch(torch.nn.Module):
         def __init__(self):
-            super(DivConstantBatch, self).__init__()
+            super().__init__()
             self.register_buffer('y', torch.ones((1, 3, 10, 10)))
 
         def forward(self, x):

@@ -1,5 +1,5 @@
-import pytest
 import torch
+
 from torch2trt.flattener import Flattener
 
 
@@ -34,7 +34,7 @@ def test_flattener_tuple():
 
 
 def test_flattener_list():
-    
+
     x = [torch.ones(3), torch.ones(3)]
 
     flattener = Flattener.from_value(x)
@@ -53,7 +53,7 @@ def test_flattener_list():
 
 
 def test_flattener_dict():
-    
+
     x = {'a': torch.ones(3), 'b': torch.ones(3)}
 
     flattener = Flattener.from_value(x)
@@ -79,7 +79,7 @@ def test_flattener_nested_tuple():
     y = flattener.flatten(x)
 
     assert(len(y) == 3)
-    
+
     z = flattener.unflatten(y)
 
     assert(isinstance(z, tuple))
@@ -98,7 +98,7 @@ def test_flattener_nested_list():
     y = flattener.flatten(x)
 
     assert(len(y) == 3)
-    
+
     z = flattener.unflatten(y)
 
     assert(isinstance(z, list))
@@ -112,7 +112,7 @@ def test_flattener_nested_list():
 
 
 def test_flattener_nested_dict():
-    
+
     x = {'a': torch.ones(1), 'b': {'a': torch.ones(2), 'b': torch.ones(3)}}
 
     flattener = Flattener.from_value(x)

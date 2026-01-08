@@ -1,7 +1,7 @@
-import pytest
+import tensorrt as trt
 import torch
 import torch.nn as nn
-import tensorrt as trt
+
 from torch2trt import torch2trt
 from torch2trt.dataset import ListDataset
 

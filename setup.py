@@ -1,9 +1,17 @@
 import sys
-import tensorrt
-import torch
 from setuptools import setup, find_packages
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CppExtension
-from packaging import version
+
+# Try to import tensorrt and torch, but don't fail if they're not available during build
+try:
+    import tensorrt
+    import torch
+    from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CppExtension
+    from packaging import version
+    HAVE_DEPS = True
+except ImportError:
+    HAVE_DEPS = False
+    BuildExtension = None
+    CUDAExtension = None
 
 
 def trt_inc_dir():
@@ -16,33 +24,39 @@ ext_modules = []
 exclude_dir = ["torch2trt/contrib","torch2trt/contrib.*"]
 
 compile_args_cxx = []
-if version.parse(torch.__version__) < version.parse('1.5'):
-    compile_args_cxx.append('-DUSE_DEPRECATED_INTLIST')
-if version.parse(tensorrt.__version__) < version.parse('8'):
-    compile_args_cxx.append('-DPRE_TRT8')
+if HAVE_DEPS:
+    from packaging import version
+    if version.parse(torch.__version__) < version.parse('1.5'):
+        compile_args_cxx.append('-DUSE_DEPRECATED_INTLIST')
+    if version.parse(tensorrt.__version__) < version.parse('8'):
+        compile_args_cxx.append('-DPRE_TRT8')
 
-plugins_ext_module = CUDAExtension(
-        name='plugins',
-        sources=[
-            'torch2trt/plugins/plugins.cpp'
-        ],
-        include_dirs=[
-            trt_inc_dir()
-        ],
-        library_dirs=[
-            trt_lib_dir()
-        ],
-        libraries=[
-            'nvinfer'
-        ],
-        extra_compile_args={
-            'cxx': compile_args_cxx,
-            'nvcc': []
-        }
-    )
+if HAVE_DEPS and CUDAExtension:
+    plugins_ext_module = CUDAExtension(
+            name='plugins',
+            sources=[
+                'torch2trt/plugins/plugins.cpp'
+            ],
+            include_dirs=[
+                trt_inc_dir()
+            ],
+            library_dirs=[
+                trt_lib_dir()
+            ],
+            libraries=[
+                'nvinfer'
+            ],
+            extra_compile_args={
+                'cxx': compile_args_cxx,
+                'nvcc': []
+            }
+        )
+else:
+    plugins_ext_module = None
 
 if '--plugins' in sys.argv:
-    ext_modules.append(plugins_ext_module)
+    if plugins_ext_module:
+        ext_modules.append(plugins_ext_module)
     sys.argv.remove('--plugins')
 
 if '--contrib' in sys.argv:
@@ -56,5 +70,5 @@ setup(
     packages=find_packages(exclude=exclude_dir),
     ext_package='torch2trt',
     ext_modules=ext_modules,
-    cmdclass={'build_ext': BuildExtension}
+    cmdclass={'build_ext': BuildExtension} if BuildExtension else {}
 )

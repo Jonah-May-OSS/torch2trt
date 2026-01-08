@@ -1,0 +1,6 @@
+# Testing requirements for torch2trt
+pytest~=9.0.1
+pytest-timeout~=2.4.0
+pytest-xdist~=3.8.0  # for parallel test execution
+pytest-cov~=7.0.0    # for coverage reporting
+ruff~=0.14.5          # for linting and formatting

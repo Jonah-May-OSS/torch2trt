@@ -1,6 +1,6 @@
-import pytest
 import torch
 import torch.nn as nn
+
 from torch2trt import torch2trt, trt
 
 
@@ -53,7 +53,7 @@ def test_getitem_dynamic_yolox_layer():
 
     data = torch.randn(1, 3, 112, 112).cuda()
     assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
-    
+
     data = torch.randn(4, 3, 112, 112).cuda()
     assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
 
@@ -87,7 +87,7 @@ def test_getitem_dynamic_add_dim():
 
     data = torch.randn(1, 3, 112, 112).cuda()
     assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
-    
+
     data = torch.randn(4, 3, 112, 112).cuda()
     assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
 
@@ -121,7 +121,7 @@ def test_getitem_dynamic_remove_dim():
 
     data = torch.randn(1, 3, 112, 112).cuda()
     assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
-    
+
     data = torch.randn(4, 3, 112, 112).cuda()
     assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
 
@@ -155,7 +155,7 @@ def test_getitem_dynamic_remove_add_dim():
 
     data = torch.randn(1, 3, 112, 112).cuda()
     assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
-    
+
     data = torch.randn(4, 3, 112, 112).cuda()
     assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
 

@@ -1,8 +1,10 @@
-from torch2trt.torch2trt import *
-from torch2trt.module_test import add_module_test
 import tensorrt as trt
 
-@tensorrt_converter('torch2trt.contrib.qat.layers.quant_conv.IQuantConvBN2d.forward', enabled=trt_version() >= '7.0') 
+from torch2trt.module_test import add_module_test
+from torch2trt.torch2trt import *
+
+
+@tensorrt_converter('torch2trt.contrib.qat.layers.quant_conv.IQuantConvBN2d.forward', enabled=trt_version() >= '7.0')
 def convert_QuantConv(ctx):
     module = ctx.method_args[0]
     input = ctx.method_args[1]
@@ -28,7 +30,7 @@ def convert_QuantConv(ctx):
         dilation = (dilation, ) * input_dim
 
     kernel = module.folded_weight.detach().cpu().numpy()
-    
+
     bias = None #trt.Weights(torch_dtype_to_trt(module.weight.dtype))
     if hasattr(module,'folded_bias'):
         bias = module.folded_bias.detach().cpu().numpy()
@@ -45,7 +47,7 @@ def convert_QuantConv(ctx):
 
     if module.groups is not None:
         layer.num_groups = module.groups
-    
+
     if 'qat_mode' in ctx.torch2trt_kwargs:
         #Setting dynamic range for conv
         w_quant_amax = module._weight_quantizer.learned_amax
@@ -97,5 +99,5 @@ def test_Conv3d_kernel3_trt7():
 @add_module_test(torch.float32, torch.device('cuda'), [(1, 10, 64, 64, 64)], enabled=trt_version() >= '7.0')
 def test_Conv3d_dilation2_trt7():
     return torch.nn.Conv3d(10, 5, kernel_size=3, stride=1, padding=1, dilation=2)
-    
+
 '''

@@ -1,0 +1,79 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: "Tests (self-hosted)"
+    runs-on: self-hosted
+    if: github.repository == 'Jonah-May-OSS/torch2trt'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.13'
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+        
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-test.txt
+        
+    - name: Run ruff linter
+      run: |
+        ruff check torch2trt/ tests/ run_tests.py
+      continue-on-error: false
+        
+    - name: Install dependencies
+      run: |
+        pip install torch torchvision
+        pip install timm
+        pip install -r ./requirements/requirements_10.txt
+        pip install -r requirements-test.txt
+        
+    - name: Install torch2trt
+      run: |
+        pip install -e .
+        
+    - name: Clear Python cache
+      run: |
+        find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+        find . -type f -name "*.pyc" -delete 2>/dev/null || true
+        
+    - name: Check CUDA availability
+      run: |
+        python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA version: {torch.version.cuda if torch.cuda.is_available() else \"N/A\"}')"
+        
+    - name: Run full test suite
+      run: |
+        pytest tests/ -v --tb=short
+      continue-on-error: false
+      
+    - name: Generate coverage report
+      if: always()
+      run: |
+        pytest tests/ --cov=torch2trt --cov-report=term --cov-report=html
+      continue-on-error: true
+      
+    - name: Upload coverage report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: htmlcov/

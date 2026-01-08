@@ -1,7 +1,8 @@
 import math
+import sys
+
 from torch2trt.torch2trt import *
 from torch2trt.version_utils import Version
-import sys
 
 if Version(sys.version.split(" ")[0]) >= "3.10":
     import collections.abc as collections
@@ -15,11 +16,11 @@ def convert_leaky_relu(ctx):
     input = get_arg(ctx, 'input', pos=0, default=None)
     negative_slope = get_arg(ctx, 'negative_slope', pos=1, default=0.01)
     output = ctx.method_return
-    
+
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.LEAKY_RELU)
     layer.alpha = negative_slope
-    
+
     output._trt = layer.get_output(0)
 
 
@@ -29,11 +30,11 @@ def convert_elu(ctx):
     input = get_arg(ctx, 'input', pos=0, default=None)
     alpha = get_arg(ctx, 'alpha', pos=1, default=1.0)
     output = ctx.method_return
-    
+
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.ELU)
     layer.alpha = alpha
-    
+
     output._trt = layer.get_output(0)
 
 
@@ -43,25 +44,25 @@ def convert_elu(ctx):
 @tensorrt_converter('torch.nn.functional.selu_')
 def convert_selu(ctx):
     input = get_arg(ctx, 'input', pos=0, default=None)
-    alpha = get_arg(ctx, 'alpha', pos=1, default=1.0)
+    get_arg(ctx, 'alpha', pos=1, default=1.0)
     output = ctx.method_return
-    
+
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.SELU)
     layer.alpha = 1.6732632423543772848170429916717
     layer.beta = 1.0507009873554804934193349852946
-    
+
     output._trt = layer.get_output(0)
- 
+
 
 @tensorrt_converter('torch.nn.functional.softsign')
 def convert_softsign(ctx):
     input = get_arg(ctx, 'input', pos=0, default=None)
     output = ctx.method_return
-    
+
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.SOFTSIGN)
-    
+
     output._trt = layer.get_output(0)
 
 
@@ -69,12 +70,12 @@ def convert_softsign(ctx):
 def convert_softplus(ctx):
     input = get_arg(ctx, 'input', pos=0, default=None)
     output = ctx.method_return
-    
+
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.SOFTPLUS)
-    
+
     output._trt = layer.get_output(0)
-   
+
 
 def convert_adaptive_pool(ctx, pool_type: trt.PoolingType):
     input = ctx.method_args[0]
@@ -87,7 +88,7 @@ def convert_adaptive_pool(ctx, pool_type: trt.PoolingType):
 
     if nd == 1:
         raise NotImplementedError
-        
+
     if not isinstance(output_size, tuple):
         output_size = (output_size,) * nd
 
@@ -140,18 +141,18 @@ def convert_add(ctx):
 @tensorrt_converter('torch.nn.functional.batch_norm')
 def convert_batch_norm(ctx):
 
-    input = get_arg(ctx, 'input', pos=0, default=None) 
-    running_mean = get_arg(ctx, 'running_mean', pos=1, default=None) 
-    running_var = get_arg(ctx, 'running_var', pos=2, default=None) 
+    input = get_arg(ctx, 'input', pos=0, default=None)
+    running_mean = get_arg(ctx, 'running_mean', pos=1, default=None)
+    running_var = get_arg(ctx, 'running_var', pos=2, default=None)
 
-    weight = get_arg(ctx, 'weight', pos=3, default=None) 
-    bias = get_arg(ctx, 'bias', pos=4, default=None) 
-    eps = get_arg(ctx, 'eps', pos=7, default=10e-6) 
+    weight = get_arg(ctx, 'weight', pos=3, default=None)
+    bias = get_arg(ctx, 'bias', pos=4, default=None)
+    eps = get_arg(ctx, 'eps', pos=7, default=10e-6)
 
     ndim = input.ndim - 2
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     output = ctx.method_return
-    
+
     scale = weight.detach().cpu().numpy() / np.sqrt(running_var.detach().cpu().numpy() + eps)
     bias = bias.detach().cpu().numpy() - running_mean.detach().cpu().numpy() * scale
     power = np.ones_like(scale)
@@ -159,7 +160,7 @@ def convert_batch_norm(ctx):
     if ndim == 1:
         # reshape to 2D
         layer = ctx.network.add_shuffle(input_trt)
-        
+
         if len(input.shape) == 2:
             layer.reshape_dims = (0, 0, 1, 1)
         else:
@@ -211,18 +212,18 @@ def convert_split_or_chunk(ctx):
     # we don't need to parse split/chunk (arg 1)
     # since we infer size from output tensors
     dim = get_arg(ctx, 'dim', 2, 0)
-    
+
     outputs = ctx.method_return
-    
+
     # assert(dim >= 1)
-    
-    start = [0] * len(input.shape) 
+
+    start = [0] * len(input.shape)
     stride = [1] * len(start)
     offset = 0
-    
+
     # add slice layers
-    for i, output in enumerate(outputs):
-        shape = list(output.shape) 
+    for _i, output in enumerate(outputs):
+        shape = list(output.shape)
         start[dim] = offset
         layer = ctx.network.add_slice(input_trt, start=start, shape=shape, stride=stride)
         output._trt = layer.get_output(0)
@@ -259,9 +260,9 @@ def convert_clamp_min(ctx):
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     val = ctx.method_args[1]
     output = ctx.method_return
-    
+
     layer = __add_clamp(ctx.network, input_trt, val, trt.ElementWiseOperation.MAX)
-    
+
     output._trt = layer.get_output(0)
 
 
@@ -272,9 +273,9 @@ def convert_clamp_max(ctx):
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     val = ctx.method_args[1]
     output = ctx.method_return
-    
+
     layer = __add_clamp(ctx.network, input_trt, val, trt.ElementWiseOperation.MIN)
-    
+
     output._trt = layer.get_output(0)
 
 
@@ -295,9 +296,9 @@ def convert_clamp(ctx):
         layer = __add_clamp(ctx.network, input_trt, max_val, trt.ElementWiseOperation.MIN)
     else:
         raise RuntimeError("Unsupported argument combination")
-    
+
     output._trt = layer.get_output(0)
-    
+
 
 @tensorrt_converter('torch.clone')
 @tensorrt_converter('torch.Tensor.clone')
@@ -330,13 +331,13 @@ def convert_gt(ctx):
 
 @tensorrt_converter('torch.lt')
 @tensorrt_converter('torch.Tensor.__lt__')
-def convert_gt(ctx):
+def convert_lt(ctx):
     return _convert_elementwise(ctx, trt.ElementWiseOperation.LESS)
 
 
 @tensorrt_converter('torch.eq')
 @tensorrt_converter('torch.Tensor.__eq__')
-def convert_gt(ctx):
+def convert_eq(ctx):
     return _convert_elementwise(ctx, trt.ElementWiseOperation.EQUAL)
 
 
@@ -352,12 +353,12 @@ def convert_conv2d3d(ctx):
     padding = get_arg(ctx, 'padding', pos=4, default=0)
     dilation = get_arg(ctx, 'dilation', pos=5, default=1)
     groups = get_arg(ctx, 'groups', pos=6, default=1)
-    
+
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     output = ctx.method_return
 
     input_dim = input.dim() - 2
-    
+
     out_channels = int(weight.shape[0])
     kernel_size = tuple(weight.shape[2:])
     if not isinstance(kernel_size, tuple):
@@ -374,7 +375,7 @@ def convert_conv2d3d(ctx):
 
 
     kernel = weight.detach().cpu().numpy()
-    
+
     if bias is not None:
         bias = bias.detach().cpu().numpy()
 
@@ -386,7 +387,7 @@ def convert_conv2d3d(ctx):
         dilation = dilation + (1,)
         unsqueeze_layer = ctx.network.add_shuffle(input_trt)
         set_layer_precision(ctx, unsqueeze_layer)
-        unsqueeze_layer.reshape_dims = tuple([0]*input.ndim) + (1,) 
+        unsqueeze_layer.reshape_dims = tuple([0]*input.ndim) + (1,)
         conv_input = unsqueeze_layer.get_output(0)
     else:
         conv_input = input_trt
@@ -430,12 +431,12 @@ def convert_conv_transpose2d3d(ctx):
     padding = get_arg(ctx, 'padding', pos=4, default=0)
     dilation = get_arg(ctx, 'dilation', pos=5, default=1)
     groups = get_arg(ctx, 'groups', pos=6, default=1)
-    
+
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     output = ctx.method_return
 
     input_dim = input.dim() - 2
-    
+
     out_channels = int(weight.shape[0])
     kernel_size = tuple(weight.shape[2:])
 
@@ -452,7 +453,7 @@ def convert_conv_transpose2d3d(ctx):
         dilation = (dilation, ) * input_dim
 
     kernel = weight.detach().cpu().numpy()
-    
+
 
     if bias is not None:
         bias = bias.detach().cpu().numpy()
@@ -469,7 +470,7 @@ def convert_conv_transpose2d3d(ctx):
         dilation = dilation + (1,)
         unsqueeze_layer = ctx.network.add_shuffle(input_trt)
         set_layer_precision(ctx, unsqueeze_layer)
-        unsqueeze_layer.reshape_dims = tuple([0]*input.ndim) + (1,) 
+        unsqueeze_layer.reshape_dims = tuple([0]*input.ndim) + (1,)
         conv_input = unsqueeze_layer.get_output(0)
     else:
         conv_input = input_trt
@@ -483,7 +484,7 @@ def convert_conv_transpose2d3d(ctx):
         bias=bias)
     conv_layer.stride_nd = stride
     conv_layer.padding_nd = padding
-    
+
     if groups is not None:
         conv_layer.num_groups = groups
 
@@ -531,7 +532,7 @@ def convert_einsum(ctx):
     einsum_eq = ctx.method_args[0]
     input_tensors = ctx.method_args[1:]
     output = ctx.method_return
-    
+
     layer = ctx.network.add_einsum(
         [t._trt for t in input_tensors],
         einsum_eq
@@ -546,20 +547,20 @@ def convert_expand(ctx):
 
     if not hasattr(input, '_trt'):
         return
-        
-    sizes = ctx.method_args[1:]
+
+    ctx.method_args[1:]
     output = ctx.method_return
-    
+
     inshape = tuple(input.shape)
     shape = tuple(output.shape)
     ndim = len(shape)
     start = tuple([0]*ndim)
     stride = tuple([int(i == o) for i, o in zip(inshape, shape)])  # stride == 1 if dimensions match, 0 otherwise
-    
+
     layer = ctx.network.add_slice(input._trt, start, shape, stride)
-    
+
     output._trt = layer.get_output(0)
-    
+
 
 @tensorrt_converter('torch.flatten')
 @tensorrt_converter('torch.Tensor.flatten')
@@ -632,18 +633,18 @@ def convert_gelu(ctx):
     # approximate equation 1 from paper
     input = get_arg(ctx, 'input', 0, None)
     output = ctx.method_return
-    
+
     x, c05, c1, cs2pi, c044, c3 = add_missing_trt_tensors(
         ctx.network,
         [input, 0.5, 1.0, math.sqrt(2.0 / math.pi), 0.044715, 3.0]
     )
-    
+
     x, c05, c1, cs2pi, c044, c3 = broadcast_trt_tensors(
-        ctx.network, 
-        [x, c05, c1, cs2pi, c044, c3], 
+        ctx.network,
+        [x, c05, c1, cs2pi, c044, c3],
         len(output.shape)
     )
-    
+
     y = ctx.network.add_elementwise(x, c3, trt.ElementWiseOperation.POW).get_output(0)
     y = ctx.network.add_elementwise(y, c044, trt.ElementWiseOperation.PROD).get_output(0)
     y = ctx.network.add_elementwise(x, y, trt.ElementWiseOperation.SUM).get_output(0)
@@ -652,22 +653,22 @@ def convert_gelu(ctx):
     y = ctx.network.add_elementwise(y, c1, trt.ElementWiseOperation.SUM).get_output(0)
     y = ctx.network.add_elementwise(x, y, trt.ElementWiseOperation.PROD).get_output(0)
     y = ctx.network.add_elementwise(y, c05, trt.ElementWiseOperation.PROD).get_output(0)
-    
+
     output._trt = y
 
 
 def slice_to_trt(ctx, dim_size, dim_slice):
-    
+
     start = 0 if dim_slice.start is None else dim_slice.start
     stop = dim_size if dim_slice.stop is None else dim_slice.stop
     stride = 1 if dim_slice.step is None else dim_slice.step
-    
+
     start = make_int_wrapper(start)
     stop = make_int_wrapper(stop)
     stride = make_int_wrapper(stride)
 
     size = (stop - start - 1) // stride + 1
-    
+
     return start, size, stride
 
 
@@ -684,19 +685,19 @@ def convert_tensor_getitem(ctx):
     input = ctx.method_args[0]
     slices = ctx.method_args[1]
     output = ctx.method_return
-    
+
     if not hasattr(input, '_trt'):
         return
 
     input_trt = input._trt
-    
+
     # Step 1 - Replace ellipsis with expanded slices
-    
+
     num_ellipsis = len(input.shape) - num_slice_types(slices)
-    
+
     new_slices = []
     for s in slices:
-        
+
         if s == Ellipsis:
             while num_ellipsis > 0:
                 new_slices.append(slice(None, None, None))
@@ -707,48 +708,48 @@ def convert_tensor_getitem(ctx):
             new_slices.append(None)
         elif isinstance(s, int) or isinstance(s, IntWrapper):
             new_slices.append(s)
-            
+
     # fill missing slices at end
     while num_slice_types(new_slices) < len(input.shape):
         new_slices.append(slice(None, None, None))
-            
+
     # Step 2 - Remove batch from slices (TRT from this point)
-    
+
     slices = tuple(new_slices) # remove batch
-    
-    
+
+
     # Step 3 - Add slice layer (will currently ignore 'None' slices)
-    
+
     starts = []
     sizes = []
     strides = []
-    
+
     input_dim = 0
 
     input_size = input.size()
 
     for s in slices:
-        
+
         if input_dim >= len(input_trt.shape):
             break
-        
+
         if isinstance(s, slice):
             start, size, stride = slice_to_trt(ctx, input_size[input_dim], s)
             starts.append(start)
             sizes.append(size)
             strides.append(stride)
             input_dim += 1
-            
+
         elif isinstance(s, int) or isinstance(s, IntWrapper):
             starts.append(make_int_wrapper(s))
             sizes.append(make_int_wrapper(1))
             strides.append(make_int_wrapper(1))
             input_dim += 1
-    
+
     starts = make_size_wrapper(starts)
     sizes = make_size_wrapper(sizes)
     strides = make_size_wrapper(strides)
-    
+
     # make positive
     def make_positive(size):
         sizes = []
@@ -786,20 +787,20 @@ def convert_tensor_getitem(ctx):
                 i += 1
             elif isinstance(s, int) or isinstance(s, IntWrapper):
                 # remove int dim
-                i += 1  
+                i += 1
             else:
                 # insert None dim
                 final_shape.append(make_int_wrapper(1))
-                
+
         final_shape = make_size_wrapper(final_shape)
 
         layer = ctx.network.add_shuffle(output_trt)
         layer.reshape_dims = tuple(output.shape) # exclude batch
         layer.set_input(1, final_shape._trt)
         output_trt = layer.get_output(0)
-        
+
     output._trt = output_trt
-    
+
 
 @tensorrt_converter('torch.nn.functional.group_norm')
 def convert_group_norm(ctx):
@@ -813,7 +814,7 @@ def convert_group_norm(ctx):
 
 
     input_trt, eps_trt = add_missing_trt_tensors(ctx.network, [input, eps])
-    
+
     shape = list(input.shape)
     split_shape = [shape[0]] + [num_groups, shape[1] // num_groups] + shape[2:]
     split_shape = tuple(split_shape)
@@ -886,25 +887,25 @@ def convert_functional_identity(ctx):
 
 def _add_scale_1d2d3d(network, x_trt, mode, offset, scale, power):
     ndim = len(x_trt.shape)
-    
+
     y_trt = x_trt
-    
+
     # shape to 2D
     if ndim != 4:
         layer = network.add_shuffle(y_trt)
         layer.reshape_dims = (x_trt.shape[0], x_trt.shape[1], x_trt.shape[2], -1)  # NCH -> NCHW
         y_trt = layer.get_output(0)
-        
+
     y_trt = network.add_scale(y_trt, mode, offset, scale, power).get_output(0)
 
     # shape to original dimension
-    if ndim != 4:    
+    if ndim != 4:
         layer = network.add_shuffle(layer.get_output(0))
         layer.reshape_dims = tuple(x_trt.shape)
         y_trt = layer.get_output(0)
-    
+
     return y_trt
-        
+
 
 @tensorrt_converter('torch.instance_norm')
 @tensorrt_converter('torch.nn.functional.instance_norm')
@@ -915,77 +916,77 @@ def convert_instance_norm(ctx):
     weight = get_arg(ctx, 'weight', pos=3, default=None)
     bias = get_arg(ctx, 'bias', pos=4, default=None)
     use_input_stats = get_arg(ctx, 'use_input_stats', pos=5, default=True)
-    momentum = get_arg(ctx, 'momentum', pos=6, default=0.1)
+    get_arg(ctx, 'momentum', pos=6, default=0.1)
     eps = get_arg(ctx, 'eps', pos=7, default=1e-05)
     output = ctx.method_return
-    
-    
+
+
     # CASE 1 - USING RUNNING STATISTICS
     if not use_input_stats:
-        
+
         # equivalent to batch norm
         scale = 1.0 / np.sqrt(running_var.detach().cpu().numpy() + eps)
         offset = -running_mean.detach().cpu().numpy() * scale
         power = np.ones_like(scale)
-        
+
         if weight is not None:
             scale *= weight.detach().cpu().numpy()
             offset += bias.detach().cpu().numpy()
-            
+
         result_trt = _add_scale_1d2d3d(ctx.network, input._trt, trt.ScaleMode.CHANNEL, offset, scale, power)
-    
+
         output._trt = result_trt
-        
+
     # CASE 2 - USING INPUT STATS
     else:
-        
+
         eps_np = np.array([eps], dtype=np.float32)
         keep_dims = True
         reduce_axes = torch_dim_to_trt_axes(tuple(range(2, len(input.shape))))
-        
+
         # compute mean over spatial
         mean_trt = ctx.network.add_reduce(input._trt, trt.ReduceOperation.AVG, reduce_axes, keep_dims).get_output(0)
-        
+
         # compute variance over spatial (include eps, to reduce layer count)
         delta_trt = ctx.network.add_elementwise(input._trt, mean_trt, trt.ElementWiseOperation.SUB).get_output(0)
         var_trt = ctx.network.add_scale(delta_trt, trt.ScaleMode.UNIFORM, np.zeros_like(eps_np), np.ones_like(eps_np), 2 * np.ones_like(eps_np)).get_output(0)
         var_trt = ctx.network.add_reduce(var_trt, trt.ReduceOperation.AVG, reduce_axes, keep_dims).get_output(0)
-        
+
         # compute sqrt(var + eps)
         var_trt = ctx.network.add_scale(var_trt, trt.ScaleMode.UNIFORM, eps_np, np.ones_like(eps_np), 0.5 * np.ones_like(eps_np)).get_output(0)
-        
+
         # compute final result
         result_trt = ctx.network.add_elementwise(delta_trt, var_trt, trt.ElementWiseOperation.DIV).get_output(0)
-        
+
         # compute affine (if applicable)
         if weight is not None:
-            
+
             weight_np = weight.detach().cpu().numpy()
             bias_np = bias.detach().cpu().numpy()
-            
+
             result_trt = _add_scale_1d2d3d(ctx.network, result_trt, trt.ScaleMode.CHANNEL, bias_np, weight_np, np.ones_like(bias_np))
-        
+
         output._trt = result_trt
 
-                                                  
+
 @tensorrt_converter('torch.nn.functional.interpolate')
 @tensorrt_converter('torch.nn.functional.upsample')
-def convert_interpolate(ctx):                                     
-    #parse args                     
-    input = get_arg(ctx, 'input', pos=0, default=None) 
+def convert_interpolate(ctx):
+    #parse args
+    input = get_arg(ctx, 'input', pos=0, default=None)
     size = get_arg(ctx, 'size', pos=1, default=None)
     scale_factor=get_arg(ctx, 'scale_factor', pos=2, default=None)
     mode = get_arg(ctx, 'mode', pos=3, default='nearest')
     align_corners = get_arg(ctx, 'align_corners', pos=4, default=None)
 
     input_dim = input.dim() - 2
-    
+
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     output = ctx.method_return
     layer = ctx.network.add_resize(input=input_trt)
 
     shape = size
-    if shape != None:
+    if shape is not None:
         if isinstance(shape, collections.Sequence):
             shape = [input.size(0), input.size(1)] + list(shape)
             shape = make_size_wrapper(shape)
@@ -997,7 +998,7 @@ def convert_interpolate(ctx):
         layer.set_input(1, shape._trt)
 
     scales = scale_factor
-    if scales != None:
+    if scales is not None:
         if not isinstance(scales, collections.Sequence):
             scales = [scales] * input_dim
         layer.scales = [1, 1] + list(scales)
@@ -1013,8 +1014,8 @@ def convert_interpolate(ctx):
             layer.coordinate_transformation = trt.ResizeCoordinateTransformation.HALF_PIXEL
         else:
             raise RuntimeError(f"Interpolation with mode={mode} is not supported by torch2trt.")
-        
-    
+
+
     def configure_resize_trt_pre_10(layer):
         if mode.lower() in ["linear", "bilinear", "trilinear"]:
             layer.resize_mode = trt.ResizeMode.LINEAR
@@ -1026,13 +1027,13 @@ def convert_interpolate(ctx):
             layer.coordinate_transformation = trt.ResizeCoordinateTransformation.HALF_PIXEL
         else:
             raise RuntimeError(f"Interpolation with mode={mode} is not supported by torch2trt.")
-            
+
     if trt_version() >= "10.0":
         configure_resize_trt_10(layer)
     else:
         configure_resize_trt_pre_10(layer)
 
-    if align_corners != None:
+    if align_corners is not None:
         if trt_version() > '8.0':
             if align_corners:
                 layer.coordinate_transformation = trt.ResizeCoordinateTransformation.ALIGN_CORNERS
@@ -1050,46 +1051,46 @@ def convert_layer_norm(ctx):
     bias = get_arg(ctx, 'bias', 3, None)
     eps = get_arg(ctx, 'eps', 4, 1e-05)
     output = ctx.method_return
-    
+
     input_trt, eps_trt = add_missing_trt_tensors(
         ctx.network,
         [input, eps]
     )
-    
+
     input_trt, eps_trt = broadcast_trt_tensors(
-        ctx.network, 
+        ctx.network,
         [input_trt, eps_trt],
         len(output.shape)
     )
-    
+
     if weight is not None:
         _, weight_trt = add_missing_trt_tensors(
             ctx.network,
             [input, weight]
         )
         _, weight_trt = broadcast_trt_tensors(
-            ctx.network, 
+            ctx.network,
             [input_trt, weight_trt],
             len(output.shape)
         )
-    
+
     if bias is not None:
         _, bias_trt = add_missing_trt_tensors(
             ctx.network,
             [input, bias]
         )
         _, bias_trt = broadcast_trt_tensors(
-            ctx.network, 
+            ctx.network,
             [input_trt, bias_trt],
             len(output.shape)
         )
-    
+
     if isinstance(shape, int):
         shape = (shape,)
     dim = tuple([-i - 1 for i in range(len(shape))])
     dim = torch_dim_resolve_negative(dim, len(input.shape))
     axes = torch_dim_to_trt_axes(dim)
-    
+
     ux = ctx.network.add_reduce(input_trt, trt.ReduceOperation.AVG, axes, keep_dims=True).get_output(0)
     numerator = ctx.network.add_elementwise(input_trt, ux, trt.ElementWiseOperation.SUB).get_output(0)
     varx = ctx.network.add_elementwise(numerator, numerator, trt.ElementWiseOperation.PROD).get_output(0)
@@ -1097,15 +1098,15 @@ def convert_layer_norm(ctx):
     denom = ctx.network.add_elementwise(varx, eps_trt, trt.ElementWiseOperation.SUM).get_output(0)
     denom = ctx.network.add_unary(denom, trt.UnaryOperation.SQRT).get_output(0)
     y = ctx.network.add_elementwise(numerator, denom, trt.ElementWiseOperation.DIV).get_output(0)
-    
+
     if weight is not None:
         y = ctx.network.add_elementwise(y, weight_trt, trt.ElementWiseOperation.PROD).get_output(0)
-        
+
     if bias is not None:
         y = ctx.network.add_elementwise(y, bias_trt, trt.ElementWiseOperation.SUM).get_output(0)
-    
+
     output._trt = y
-    
+
 
 @tensorrt_converter('torch.nn.functional.linear')
 def convert_linear(ctx):
@@ -1118,12 +1119,12 @@ def convert_linear(ctx):
     if trt_version() < "10.0":
         # reshape to ...xNx1x1
         layer = ctx.network.add_shuffle(input_trt)
-        layer.reshape_dims = tuple([0]*input.ndim) + (1, 1) 
+        layer.reshape_dims = tuple([0]*input.ndim) + (1, 1)
 
         bias_trt = trt.Weights(torch_dtype_to_trt(weight.dtype))
         if bias is not None:
             bias_trt = bias.detach().cpu().numpy()
-            
+
         # add fully connected
         layer = ctx.network.add_fully_connected(
             input=layer.get_output(0),
@@ -1146,10 +1147,10 @@ def convert_linear(ctx):
         bias_shape = [1] * (input.ndim - 1) + [int(weight.shape[0])]
         bias = bias.reshape(bias_shape)
 
-        
+
         if weight.ndim < input.ndim:
             weight = weight[None, ...]
-            
+
         kernel_const = ctx.network.add_constant(tuple(weight.shape), weight)
         bias_const = ctx.network.add_constant(tuple(bias.shape), bias)
 
@@ -1161,14 +1162,14 @@ def convert_linear(ctx):
         )
 
         bias_add = ctx.network.add_elementwise(
-            mm.get_output(0), 
-            bias_const.get_output(0), 
+            mm.get_output(0),
+            bias_const.get_output(0),
             trt.ElementWiseOperation.SUM
-        
+
         )
 
         output._trt = bias_add.get_output(0)
-        
+
 
 
 
@@ -1214,7 +1215,7 @@ def convert_max_pool_nd(ctx):
     kernel_size = get_arg(ctx, "kernel_size", pos=1, default=None)
     stride = get_arg(ctx, "stride", pos=2, default=None)
     padding = get_arg(ctx, "padding", pos=3, default=0)
-    dilation = get_arg(ctx, "dilation", pos=4, default=1)
+    get_arg(ctx, "dilation", pos=4, default=1)
     ceil_mode = get_arg(ctx, "ceil_mode", pos=5, default=False)
 
     trt_pooling_type = trt.PoolingType.MAX
@@ -1245,7 +1246,7 @@ def convert_max_pool_nd(ctx):
         padding = padding + (0,)
         unsqueeze_layer = ctx.network.add_shuffle(input_trt)
         set_layer_precision(ctx, unsqueeze_layer)
-        unsqueeze_layer.reshape_dims = tuple([0]*input.ndim) + (1,) 
+        unsqueeze_layer.reshape_dims = tuple([0]*input.ndim) + (1,)
         pool_input = unsqueeze_layer.get_output(0)
     else:
         pool_input = input_trt
@@ -1260,7 +1261,7 @@ def convert_max_pool_nd(ctx):
     if ceil_mode:
         pooling_layer.padding_mode = trt.PaddingMode.EXPLICIT_ROUND_UP
 
-    
+
     if ndim == 1:
         squeeze_layer = ctx.network.add_shuffle(pooling_layer.get_output(0))
         set_layer_precision(ctx, squeeze_layer)
@@ -1286,7 +1287,7 @@ def convert_avg_pool_nd(ctx):
     padding = get_arg(ctx, 'padding', pos=3, default=0)
     ceil_mode = get_arg(ctx, 'ceil_mode', pos=4, default=False)
     count_include_pad = get_arg(ctx, 'count_include_pad', pos=5, default=True)
-    
+
     # get input trt tensor (or create constant if it doesn't exist)
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     output = ctx.method_return
@@ -1312,18 +1313,18 @@ def convert_avg_pool_nd(ctx):
         padding = padding + (0,)
         unsqueeze_layer = ctx.network.add_shuffle(input_trt)
         set_layer_precision(ctx, unsqueeze_layer)
-        unsqueeze_layer.reshape_dims = tuple([0]*input.ndim) + (1,) 
+        unsqueeze_layer.reshape_dims = tuple([0]*input.ndim) + (1,)
         pool_input = unsqueeze_layer.get_output(0)
     else:
         pool_input = input_trt
 
     pooling_layer = ctx.network.add_pooling_nd(
         input=pool_input, type=trt.PoolingType.AVERAGE, window_size=kernel_size)
-    
+
     pooling_layer.stride_nd = stride
     pooling_layer.padding_nd = padding
     pooling_layer.average_count_excludes_padding = not count_include_pad
-    
+
     if ceil_mode:
         pooling_layer.padding_mode = trt.PaddingMode.EXPLICIT_ROUND_UP
 
@@ -1357,7 +1358,7 @@ def __convert_max_reduce(ctx):
         output_val = ctx.method_return
     else:
         output_val = ctx.method_return[0]
-        output_idx = ctx.method_return[1]
+        ctx.method_return[1]
     layer = ctx.network.add_reduce(input_trt,  trt.ReduceOperation.MAX, torch_dim_to_trt_axes(dim), keepdim)
     output_val._trt = layer.get_output(0)
 
@@ -1377,22 +1378,22 @@ def convert_mean(ctx):
     input = ctx.method_args[0]
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     output = ctx.method_return
-    
+
     dim = get_arg(ctx, "dim", 1, None)
-    
+
     if dim is None:
-        dim = [i for i in range(input.ndim)]
+        dim = list(range(input.ndim))
 
     # convert list to tuple
     if isinstance(dim, list):
         dim = tuple(dim)
-        
+
     if not isinstance(dim, tuple):
         dim = (dim, )
-        
+
     # create axes bitmask for reduce layer
     axes = torch_dim_to_trt_axes(dim)
-        
+
     # get whether to keep dimensions
     if 'keepdim' in ctx.method_kwargs:
         keep_dims = ctx.method_kwargs['keepdim']
@@ -1400,7 +1401,7 @@ def convert_mean(ctx):
         keep_dims = ctx.method_args[2]
     else:
         keep_dims = False
-        
+
     layer = ctx.network.add_reduce(input_trt, trt.ReduceOperation.AVG, axes, keep_dims)
     output._trt = layer.get_output(0)
 
@@ -1424,7 +1425,7 @@ def __convert_min_reduce(ctx):
         output_val = ctx.method_return
     else:
         output_val = ctx.method_return[0]
-        output_idx = ctx.method_return[1]
+        ctx.method_return[1]
     layer = ctx.network.add_reduce(input_trt,  trt.ReduceOperation.MIN, torch_dim_to_trt_axes(dim), keepdim)
     output_val._trt = layer.get_output(0)
 
@@ -1439,7 +1440,7 @@ def convert_min(ctx):
 
 
 @tensorrt_converter('torch.fmod')
-def convert_mod(ctx):
+def convert_fmod(ctx):
     input_a = ctx.method_args[0]
     input_b = ctx.method_args[1]
     output = ctx.method_return
@@ -1501,16 +1502,16 @@ def convert_mul(ctx):
 @tensorrt_converter('torch.Tensor.narrow')
 @tensorrt_converter('torch.narrow')
 def convert_narrow(ctx):
-    inputs = get_arg(ctx, 'input', pos=0, default=None)  
+    inputs = get_arg(ctx, 'input', pos=0, default=None)
     start = get_arg(ctx, 'start', pos=2, default=None)
     output = ctx.method_return
     shape = list(inputs.shape)
     start = [0]*len(shape)
     stride = [1]*len(shape)
     dim = ctx.method_args[1] if get_arg(ctx, 'dim', pos=1, default=0) >=0 else len(shape)+get_arg(ctx, 'dim', pos=1, default=0)
-    
+
     start[dim] = ctx.method_args[2]
-    shape[dim] = ctx.method_args[3] 
+    shape[dim] = ctx.method_args[3]
     # not consider batch dimension
     input_trt = trt_(ctx.network,inputs)
     layer = ctx.network.add_slice(input=input_trt,start=start, shape=shape,stride=stride)
@@ -1537,67 +1538,67 @@ def convert_normalize(ctx):
     p = get_arg(ctx, 'p', pos=1, default=2)
     dim = get_arg(ctx, 'dim', pos=2, default=1)
     eps = get_arg(ctx, 'eps', pos=3, default=1e-12)
-    
+
 #     input_trt = input._trt
     output = ctx.method_return
-    
+
     # add broadcastable scalar constants to network
     input_trt, eps_trt, p_trt, p_inv_trt = add_missing_trt_tensors(ctx.network, [input, eps, p, 1.0 / p])
     input_trt, eps_trt, p_trt, p_inv_trt = broadcast_trt_tensors(ctx.network, [input_trt, eps_trt, p_trt, p_inv_trt], len(input_trt.shape))
-    
+
     # compute norm = sum(abs(x)**p, dim=dim)**(1./p)
     norm = ctx.network.add_unary(input_trt, trt.UnaryOperation.ABS).get_output(0)
     norm = ctx.network.add_elementwise(norm, p_trt, trt.ElementWiseOperation.POW).get_output(0)
     norm = ctx.network.add_reduce(norm, trt.ReduceOperation.SUM, torch_dim_to_trt_axes(dim), keep_dims=True).get_output(0)
     norm = ctx.network.add_elementwise(norm, p_inv_trt, trt.ElementWiseOperation.POW).get_output(0)
-    
+
     # clamp norm = max(norm, eps)
     norm = ctx.network.add_elementwise(norm, eps_trt, trt.ElementWiseOperation.MAX).get_output(0)
-    
+
     # divide input by norm
     output._trt = ctx.network.add_elementwise(input_trt, norm, trt.ElementWiseOperation.DIV).get_output(0)
-    
+
 
 @tensorrt_converter('torch.nn.functional.pad')
 def convert_pad(ctx):
     input = ctx.method_args[0]
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     output = ctx.method_return
-    
+
     pad = get_arg(ctx, "pad", 1, None)
-    mode = get_arg(ctx, "mode", 2, "constant")
-    value = get_arg(ctx, "value", 3, 0.)
+    get_arg(ctx, "mode", 2, "constant")
+    get_arg(ctx, "value", 3, 0.)
 
     pre_padding = (pad[2], pad[0])
     post_padding = (pad[3], pad[1])
-    
+
     # mode / value are ignored since not supported by TensorRT
-    
+
     layer = ctx.network.add_padding(input_trt, pre_padding, post_padding)
     output._trt = layer.get_output(0)
-    
+
 
 @tensorrt_converter('torch.Tensor.permute')
 def convert_permute(ctx):
     input = ctx.method_args[0]
 
     if not hasattr(input, '_trt'):
-        return 
-        
+        return
+
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     output = ctx.method_return
-    
+
     # permutation -1 because TRT does not include batch dim
     if isinstance(ctx.method_args[1], int):
         permutation = tuple(ctx.method_args[1:])  # handle permute(a, b, c)
     else:
         permutation = tuple(ctx.method_args[1])   # handle permute([a, b, c])
-        
+
     # assert(permutation[0] == 0)  # cannot move batch dim
-    
+
     layer = ctx.network.add_shuffle(input_trt)
     layer.second_transpose = tuple(permutation)
-   
+
     output._trt = layer.get_output(0)
 
 
@@ -1613,7 +1614,7 @@ def convert_pow(ctx):
     layer = ctx.network.add_elementwise(input_a_trt, input_b_trt, trt.ElementWiseOperation.POW)
     output._trt = layer.get_output(0)
 
-    
+
 @tensorrt_converter('torch.Tensor.__rpow__')
 def convert_rpow(ctx):
     input_a = ctx.method_args[1]
@@ -1623,34 +1624,34 @@ def convert_rpow(ctx):
     input_a_trt, input_b_trt = broadcast_trt_tensors(ctx.network, [input_a_trt, input_b_trt], len(output.shape))
     layer = ctx.network.add_elementwise(input_a_trt, input_b_trt, trt.ElementWiseOperation.POW)
     output._trt = layer.get_output(0)
-    
+
 
 @tensorrt_converter('torch.nn.functional.prelu')
 def convert_prelu(ctx):
     input = get_arg(ctx, 'input', pos=0, default=None)
     weight = get_arg(ctx, 'weight', pos=1, default=None)
     output = ctx.method_return
-    
+
     weight_shape = [1] * (len(input.shape))
     weight_shape[1] = weight.numel()
-    
+
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
-    
-   
+
+
     # y = prelu(x) = relu(x) - alpha * relu(-x)
     weight_trt = ctx.network.add_constant(weight_shape, -weight.detach().view(weight_shape).cpu().numpy()).get_output(0) # detach so considered leaf
-    
+
     # x >= 0
     a = ctx.network.add_activation(input_trt, trt.ActivationType.RELU).get_output(0)
-    
+
     # x <= 0
     b = ctx.network.add_unary(input_trt, trt.UnaryOperation.NEG).get_output(0)
     b = ctx.network.add_activation(b, trt.ActivationType.RELU).get_output(0)
     b = ctx.network.add_elementwise(b, weight_trt, trt.ElementWiseOperation.PROD).get_output(0)
-    
+
     # y = a + b
     y = ctx.network.add_elementwise(a, b, trt.ElementWiseOperation.SUM)
-    
+
     output._trt = y.get_output(0)
 
 
@@ -1695,7 +1696,7 @@ def convert_relu6(ctx):
 
     output._trt = layer.get_output(0)
 
-    
+
 @tensorrt_converter('torch.roll')
 @tensorrt_converter('torch.Tensor.roll')
 def convert_roll(ctx):
@@ -1703,30 +1704,30 @@ def convert_roll(ctx):
     shifts = get_arg(ctx, 'shifts', 1, None)
     dims = get_arg(ctx, 'dims', 2, None)
     output = ctx.method_return
-    
+
     assert dims is not None, "roll converter only supports roll when dims is specified"
-    
+
     ndim = input.ndim
-    
+
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
-    
+
     try:
         iter(shifts)
-    except:
+    except TypeError:
         shifts = (shifts,)
         dims = (dims,)
-    
+
     start = [0] * ndim
     shape = tuple([int(d) for d in input.shape])
     stride = [1] * ndim
-    
+
     for s, d in zip(shifts, dims):
         start[d] = (-s) % shape[d]
-    
+
     start = tuple(start)
     shape = tuple(shape)
     stride = tuple(stride)
-    
+
     shape_dynamic = ctx.network.add_shape(input._trt).get_output(0)
     layer = ctx.network.add_slice(
         input_trt,
@@ -1736,9 +1737,9 @@ def convert_roll(ctx):
     )
     layer.set_input(2, shape_dynamic)
     layer.mode = trt.SliceMode.WRAP
-    
+
     output._trt = layer.get_output(0)
-    
+
 
 @tensorrt_converter('torch.nn.functional.sigmoid')
 @tensorrt_converter('torch.sigmoid')
@@ -1747,22 +1748,22 @@ def convert_sigmoid(ctx):
     input = ctx.method_args[0]
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     output = ctx.method_return
-    
+
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.SIGMOID)
     output._trt = layer.get_output(0)
-    
+
 
 @tensorrt_converter('torch.nn.functional.silu')
 def convert_silu(ctx):
     input = get_arg(ctx, 'input', pos=0, default=None)
     output = ctx.method_return
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
-    
+
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.SIGMOID)
     layer = ctx.network.add_elementwise(input_trt, layer.get_output(0), trt.ElementWiseOperation.PROD)
-    
+
     output._trt = layer.get_output(0)
-    
+
 
 @tensorrt_converter('torch.Tensor.softmax')
 @tensorrt_converter('torch.nn.functional.softmax')
@@ -1776,7 +1777,7 @@ def convert_softmax(ctx):
         dim = ctx.method_kwargs['dim']
     elif len(ctx.method_args) >= 2:
         dim = ctx.method_args[1]
-        
+
     # convert negative dims
     if dim < 0:
         dim = len(input.shape) + dim
@@ -1797,9 +1798,9 @@ def convert_squeeze(ctx):
     dim = get_arg(ctx, 'dim', pos=1, default=None)
 
     if dim is None:
-        dim = tuple([i for i in range(input.ndim)])
+        dim = tuple(range(input.ndim))
 
-    dim = torch_dim_resolve_negative(dim, input.ndim) 
+    dim = torch_dim_resolve_negative(dim, input.ndim)
     # if dim < 0:
     #     dim = len(input.shape) + dim
     # assert dim >= 0
@@ -1863,9 +1864,9 @@ def convert_sub(ctx):
     layer = ctx.network.add_elementwise(input_a_trt, input_b_trt, trt.ElementWiseOperation.SUB)
     output._trt = layer.get_output(0)
 
-    
+
 @tensorrt_converter('torch.Tensor.__rsub__')
-def convert_sub(ctx):
+def convert_rsub(ctx):
     input_a = ctx.method_args[1]
     input_b = ctx.method_args[0]  # flipped for rsub
     output = ctx.method_return
@@ -1873,7 +1874,7 @@ def convert_sub(ctx):
     input_a_trt, input_b_trt = broadcast_trt_tensors(ctx.network, [input_a_trt, input_b_trt], len(output.shape))
     layer = ctx.network.add_elementwise(input_a_trt, input_b_trt, trt.ElementWiseOperation.SUB)
     output._trt = layer.get_output(0)
-    
+
 
 @tensorrt_converter('torch.sum')
 @tensorrt_converter('torch.Tensor.sum')
@@ -1885,7 +1886,7 @@ def convert_sum(ctx):
     output = ctx.method_return
     layer = ctx.network.add_reduce(input_trt,  trt.ReduceOperation.SUM, torch_dim_to_trt_axes(dim), keepdim)
     output._trt = layer.get_output(0)
-        
+
 
 @tensorrt_converter('torch.nn.functional.tanh')
 @tensorrt_converter('torch.tanh')
@@ -1893,10 +1894,10 @@ def convert_tanh(ctx):
     input = ctx.method_args[0]
     input_trt = add_missing_trt_tensors(ctx.network, [input])[0]
     output = ctx.method_return
-    
+
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.TANH)
     output._trt = layer.get_output(0)
-    
+
 
 @tensorrt_converter('torch.tensor')
 def convert_tensor(ctx):
@@ -2000,7 +2001,7 @@ def convert_cos(ctx):
 @tensorrt_converter('torch.tan_')
 @tensorrt_converter('torch.Tensor.tan')
 @tensorrt_converter('torch.Tensor.tan_')
-def convert_cos(ctx):
+def convert_tan(ctx):
     __convert_unary(ctx, trt.UnaryOperation.TAN)
 
 
@@ -2083,7 +2084,7 @@ def convert_unsqueeze(ctx):
         new_shape_trt.append(
             ctx.network.add_slice(input_shape_trt, [i], [1], [1]).get_output(0)
         )
-    
+
     # add unsqueeze dim
     new_shape_trt.insert(
         dim,
@@ -2104,11 +2105,11 @@ def convert_view(ctx):
     input = ctx.method_args[0]
     if not hasattr(input, '_trt'):
         return
-    
+
     try:
         iter(ctx.method_args[1])
         size = make_size_wrapper(ctx.method_args[1])
-    except:
+    except TypeError:
         size = make_size_wrapper(ctx.method_args[1:])
 
     output = ctx.method_return

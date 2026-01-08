@@ -1,7 +1,9 @@
 import torch
-from . import _utils
 from pytorch_quantization import tensor_quant
 from pytorch_quantization.nn.modules import _utils as utils
+
+from . import _utils
+
 
 class QuantReLU(torch.nn.ReLU,utils.QuantInputMixin):
     """
@@ -10,12 +12,12 @@ class QuantReLU(torch.nn.ReLU,utils.QuantInputMixin):
     default_quant_desc_input = tensor_quant.QUANT_DESC_8BIT_PER_TENSOR
 
     def __init__(self,inplace=False,**kwargs):
-        super(QuantReLU,self).__init__(inplace)
+        super().__init__(inplace)
         quant_desc_input = _utils.pop_quant_desc_in_kwargs(self.__class__, input_only=True, **kwargs)
         self.init_quantizer(quant_desc_input)
-    
+
     def forward(self,input):
-        output = super(QuantReLU,self).forward(input)
+        output = super().forward(input)
         ## Although o/p of relu is being quantized, terminology still says input quantizer, will change later
         output = self._input_quantizer(output)
         return output
@@ -28,13 +30,13 @@ class IQuantReLU(torch.nn.ReLU,_utils.QuantMixinInput):
     def __init__(self,inplace=False):
         super().__init__(inplace)
         self.init_quantizer()
-    
+
     def __repr__(self):
         s = super().__repr__()
-        s = "(" + s + "dynamic_range amax {0:.4f})".format(self._input_quantizer.learned_amax)
+        s = "(" + s + f"dynamic_range amax {self._input_quantizer.learned_amax:.4f})"
         return s
 
 
     def forward(self,inputs):
-        return super(IQuantReLU,self).forward(inputs)
+        return super().forward(inputs)
 

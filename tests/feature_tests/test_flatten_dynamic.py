@@ -1,6 +1,6 @@
-import pytest
-from torch2trt import torch2trt, trt
 import torch
+
+from torch2trt import torch2trt, trt
 
 
 class FlattenModule(torch.nn.Module):
@@ -57,7 +57,7 @@ def test_flatten_dynamic_0_1():
 
     x = torch.randn(4, 4, 5).cuda()
     assert(torch.allclose(module(x), module_trt(x), atol=1e-2, rtol=1e-2))
-    
+
 
 if __name__ == '__main__':
 

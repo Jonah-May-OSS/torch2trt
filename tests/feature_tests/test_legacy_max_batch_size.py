@@ -1,5 +1,6 @@
-import torch.nn as nn
 import torch
+import torch.nn as nn
+
 from torch2trt import torch2trt
 
 

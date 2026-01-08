@@ -1,18 +1,14 @@
-import torch
 import tensorrt as trt
+import torch
+
 from .flattener import Flattener
-from .misc_utils import (
-    torch_dtype_from_trt,
-    torch_device_from_trt
-)
-from .version_utils import (
-    trt_version
-)
+from .misc_utils import torch_device_from_trt, torch_dtype_from_trt
+from .version_utils import trt_version
 
 
 class TRTModule(torch.nn.Module):
     def __init__(self, engine=None, input_names=None, output_names=None, input_flattener=None, output_flattener=None):
-        super(TRTModule, self).__init__()
+        super().__init__()
         self._register_state_dict_hook(TRTModule._on_state_dict)
 
         if isinstance(engine, str):
@@ -24,7 +20,7 @@ class TRTModule(torch.nn.Module):
         elif isinstance(engine, trt.IHostMemory):
             with trt.Logger() as logger, trt.Runtime(logger) as runtime:
                 engine = runtime.deserialize_cuda_engine(engine)
-            
+
         self.engine = engine
         if self.engine is not None:
             self.context = self.engine.create_execution_context()
@@ -33,7 +29,7 @@ class TRTModule(torch.nn.Module):
         self.output_names = output_names
         self.input_flattener = input_flattener
         self.output_flattener = output_flattener
-    
+
     def _update_name_binindgs_maps(self):
         if trt_version() >= "10.0":
             self._update_name_binding_maps_trt_10()
@@ -96,7 +92,7 @@ class TRTModule(torch.nn.Module):
 
     def _forward_pre_10(self, *inputs):
         bindings = [None] * (len(self.input_names) + len(self.output_names))
-        
+
         if self.input_flattener is not None:
             inputs = self.input_flattener.flatten(inputs)
 
