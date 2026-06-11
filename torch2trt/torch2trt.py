@@ -658,6 +658,12 @@ def torch2trt(module,
     # set max workspace size
     if trt_version() < "10.0":
         config.max_workspace_size = max_workspace_size
+    else:
+        # TensorRT 10 removed IBuilderConfig.max_workspace_size; the build-time
+        # scratch budget is now a memory pool limit. Without setting it the
+        # build is unbounded and defaults to the entire device, which OOMs the
+        # GPU (and drags host RAM up with it) on larger models.
+        config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, max_workspace_size)
     
 
     # set number of avg timing itrs.
