@@ -1,6 +1,7 @@
 import torch
 import tensorrt as trt
 import numpy as np
+import os
 from collections import defaultdict
 import importlib
 
@@ -510,6 +511,74 @@ def infer_dynamic_axes(min_shapes_flat, max_shapes_flat):
                 dynamic_axes[i].append(j)
     return dynamic_axes
 
+# protobuf refuses to serialize any message larger than 2 GiB, so a plain
+# onnx.save() of a big graph dies with "EncodeError: Failed to serialize proto".
+# Whisper's large-family audio encoder (~635M params) crosses that in fp32.
+# Writing the weights out as external data keeps the proto itself small; the
+# sidecar is resolved relative to the model file, which TensorRT's
+# parse_from_file() handles.
+_PROTO_SIZE_LIMIT = 2 * 1024 ** 3
+
+# Headroom for the graph structure (nodes, names, value_info) that the
+# initializer-only estimate below does not account for.
+_PROTO_SIZE_MARGIN = 128 * 1024 ** 2
+
+
+def _tensor_nbytes(tensor):
+    """Approximate a TensorProto's serialized size without serializing it."""
+    if tensor.raw_data:
+        return len(tensor.raw_data)
+    return (
+        len(tensor.float_data) * 4
+        + len(tensor.int32_data) * 4
+        + len(tensor.int64_data) * 8
+        + len(tensor.double_data) * 8
+        + len(tensor.uint64_data) * 8
+        + sum(len(s) for s in tensor.string_data)
+    )
+
+
+def _weights_nbytes(model_proto):
+    """Sum the tensor payload of a ModelProto (initializers + attribute tensors).
+
+    ByteSize() would be exact, but it raises on exactly the oversized models
+    this estimate exists to detect.
+    """
+    total = 0
+    for tensor in model_proto.graph.initializer:
+        total += _tensor_nbytes(tensor)
+    for node in model_proto.graph.node:
+        for attr in node.attribute:
+            if attr.HasField("t"):
+                total += _tensor_nbytes(attr.t)
+            for tensor in attr.tensors:
+                total += _tensor_nbytes(tensor)
+    return total
+
+
+def save_onnx(onnx, model_proto, path):
+    """Save ``model_proto`` to ``path``, spilling weights out when it is too big.
+
+    Returns True if the weights were written to an external data file next to
+    the model, in which case the model can only be parsed from that path (the
+    serialized bytes alone no longer carry the weights).
+    """
+    if _weights_nbytes(model_proto) < _PROTO_SIZE_LIMIT - _PROTO_SIZE_MARGIN:
+        onnx.save(model_proto, path)
+        return False
+
+    onnx.save(
+        model_proto,
+        path,
+        save_as_external_data=True,
+        all_tensors_to_one_file=True,
+        location=os.path.basename(path) + ".data",
+        size_threshold=1024,
+        convert_attribute=False,
+    )
+    return True
+
+
 def torch2trt(module,
               inputs,
               input_names=None,
@@ -596,7 +665,6 @@ def torch2trt(module,
         import onnx_graphsurgeon as gs
         import onnx
         import tempfile
-        import os
 
         module_flat = Flatten(module, input_flattener, output_flattener)
         inputs_flat = input_flattener.flatten(inputs)
@@ -633,7 +701,7 @@ def torch2trt(module,
 
             # Save manipulated graph to another temp file
             tmp_out_path = os.path.join(tmpdir, "model_out.onnx")
-            onnx.save(gs.export_onnx(onnx_graph), tmp_out_path)
+            external_data = save_onnx(onnx, gs.export_onnx(onnx_graph), tmp_out_path)
 
             # Create network and parser, and parse ONNX inside context
             network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
@@ -641,6 +709,15 @@ def torch2trt(module,
             # Use context manager to read ONNX file if needed
             if hasattr(parser, "parse_from_file"):
                 parsed = parser.parse_from_file(tmp_out_path)
+            elif external_data:
+                # The weights live in a sidecar file, so the serialized model
+                # alone is not parseable — only the path-based entry point can
+                # follow the external-data reference.
+                raise RuntimeError(
+                    "ONNX model exceeds protobuf's 2 GB limit and was saved with "
+                    "external weights, but this TensorRT build's OnnxParser has no "
+                    "parse_from_file(). Upgrade TensorRT to convert this model."
+                )
             else:
                 with open(tmp_out_path, "rb") as f:
                     parsed = parser.parse(f.read())
