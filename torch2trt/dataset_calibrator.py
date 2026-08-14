@@ -2,6 +2,7 @@ import torch
 import tensorrt as trt
 import os
 from .flattener import Flattener
+from .precision import LEGACY_INT8_CALIBRATION_AVAILABLE
 
 __all__ = [
     'DEFAULT_CALIBRATION_ALGORITHM',
@@ -9,15 +10,31 @@ __all__ = [
 ]
 
 
-if trt.__version__ >= '5.1':
+# TensorRT 11 removed implicit quantization along with CalibrationAlgoType and
+# the IInt8Calibrator family, so reading either at module scope broke *every*
+# `import torch2trt` on 11.x — FP32 conversions included. Degrade to a stub
+# instead: explicit Q/DQ quantization replaces calibration there.
+if not LEGACY_INT8_CALIBRATION_AVAILABLE:
+    DEFAULT_CALIBRATION_ALGORITHM = None
+elif trt.__version__ >= '5.1':
     DEFAULT_CALIBRATION_ALGORITHM = trt.CalibrationAlgoType.ENTROPY_CALIBRATION_2
 else:
     DEFAULT_CALIBRATION_ALGORITHM = trt.CalibrationAlgoType.ENTROPY_CALIBRATION
 
 
-class DatasetCalibrator(trt.IInt8Calibrator):
+_CalibratorBase = trt.IInt8Calibrator if LEGACY_INT8_CALIBRATION_AVAILABLE else object
+
+
+class DatasetCalibrator(_CalibratorBase):
 
     def __init__(self, dataset, algorithm=DEFAULT_CALIBRATION_ALGORITHM, cache_file=None, flattener=None):
+        if not LEGACY_INT8_CALIBRATION_AVAILABLE:
+            raise RuntimeError(
+                f"TensorRT {trt.__version__} removed implicit INT8 quantization, so there "
+                "is no calibrator to run. Quantize the module explicitly instead (insert "
+                "Q/DQ, e.g. with modelopt.torch.quantization) and convert with "
+                "int8_mode=True."
+            )
         super(DatasetCalibrator, self).__init__()
         self.dataset = dataset
         self.algorithm = algorithm

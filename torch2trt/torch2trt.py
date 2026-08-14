@@ -10,6 +10,18 @@ from .dataset_calibrator import (
     DEFAULT_CALIBRATION_ALGORITHM,
 )
 
+from .precision import (
+    WEAK_TYPING_AVAILABLE,
+    LEGACY_INT8_CALIBRATION_AVAILABLE,
+    autocast_onnx_to_fp16,
+    builder_flag,
+    calibration_arrays,
+    graph_has_explicit_quantization,
+    network_creation_flags,
+    network_has_explicit_quantization,
+    quantize_onnx_int8,
+)
+
 from .dataset import (
     Dataset,
     ListDataset
@@ -602,12 +614,26 @@ def torch2trt(module,
               onnx_opset=None,
               max_batch_size=None,
               avg_timing_iterations=None,
+              fp16_op_block_list=None,
+              int8_op_block_list=None,
+              int8_calibration_eps=None,
               **kwargs):
 
     # capture arguments to provide to context
     kwargs.update(locals())
     kwargs.pop('kwargs')
-        
+
+    # On strongly typed TensorRT (11.x+) precision lives in the graph, not in
+    # builder flags, and only the ONNX path can carry it: FP16 needs AutoCast to
+    # rewrite tensor types, INT8 needs Q/DQ nodes from the exported model. Fail
+    # here rather than after a long build that silently came out FP32.
+    if not WEAK_TYPING_AVAILABLE and (fp16_mode or int8_mode) and not use_onnx:
+        raise RuntimeError(
+            f"TensorRT {trt.__version__} builds strongly typed networks, so reduced "
+            "precision has to come from the parsed graph. Convert with use_onnx=True "
+            "to request fp16_mode or int8_mode."
+        )
+
     # handle inputs as dataset of list of tensors
     if issubclass(inputs.__class__, Dataset):
         dataset = inputs
@@ -699,12 +725,52 @@ def torch2trt(module,
             onnx_graph = gs.import_onnx(onnx.load(tmp_in_path))
             onnx_graph.fold_constants().cleanup()
 
+            model_proto = gs.export_onnx(onnx_graph)
+
             # Save manipulated graph to another temp file
             tmp_out_path = os.path.join(tmpdir, "model_out.onnx")
-            external_data = save_onnx(onnx, gs.export_onnx(onnx_graph), tmp_out_path)
+            external_data = save_onnx(onnx, model_proto, tmp_out_path)
+
+            # Strongly typed TensorRT takes its precision from the graph, so
+            # rewrite the graph rather than setting builder flags. Which rewrite
+            # depends on what is being asked for: the ONNX quantizer owns INT8
+            # and can cast the unquantized remainder to FP16 in the same pass,
+            # while AutoCast handles the FP16-only case. They are not
+            # interchangeable — AutoCast does not support Q/DQ graphs.
+            if not WEAK_TYPING_AVAILABLE and (fp16_mode or int8_mode):
+                pre_quantized = graph_has_explicit_quantization(model_proto)
+                if int8_mode and not pre_quantized:
+                    calib_arrays = calibration_arrays(
+                        dataset if int8_calib_dataset is None else int8_calib_dataset,
+                        input_flattener,
+                        input_names,
+                    )
+                    quantized_path = os.path.join(tmpdir, "model_int8.onnx")
+                    quantize_onnx_int8(
+                        tmp_out_path,
+                        quantized_path,
+                        calib_arrays,
+                        fp16=fp16_mode,
+                        int8_op_block_list=int8_op_block_list,
+                        fp16_op_block_list=fp16_op_block_list,
+                        calibration_eps=int8_calibration_eps,
+                        external_data=external_data,
+                    )
+                    tmp_out_path = quantized_path
+                elif pre_quantized and fp16_mode:
+                    raise RuntimeError(
+                        "The exported graph already carries Q/DQ nodes, which AutoCast "
+                        "cannot cast to FP16 (it would leave QuantizeLinear scales at a "
+                        "type its input no longer has). Either export the module in FP16 "
+                        "yourself, or pass an unquantized module plus int8_calib_dataset "
+                        "and let the ONNX quantizer do both precisions."
+                    )
+                elif fp16_mode:
+                    model_proto = autocast_onnx_to_fp16(model_proto, fp16_op_block_list)
+                    external_data = save_onnx(onnx, model_proto, tmp_out_path)
 
             # Create network and parser, and parse ONNX inside context
-            network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+            network = builder.create_network(network_creation_flags())
             parser = trt.OnnxParser(network, logger)
             # Use context manager to read ONNX file if needed
             if hasattr(parser, "parse_from_file"):
@@ -728,7 +794,7 @@ def torch2trt(module,
                 raise RuntimeError("Failed to parse ONNX model.")
 
     else:
-        network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+        network = builder.create_network(network_creation_flags())
         with ConversionContext(network, torch2trt_kwargs=kwargs, builder_config=config, logger=logger) as ctx:
             
             inputs_flat = input_flattener.flatten(inputs)
@@ -755,27 +821,50 @@ def torch2trt(module,
     if avg_timing_iterations is not None:
         config.avg_timing_iterations = avg_timing_iterations
 
-    if fp16_mode:
+    # Precision flags only exist while TensorRT supports weak typing; on 11.x the
+    # graph was already cast above (FP16) or carries Q/DQ (INT8).
+    if fp16_mode and WEAK_TYPING_AVAILABLE:
         config.set_flag(trt.BuilderFlag.FP16)
 
     config.default_device_type = default_device_type
-    if gpu_fallback:
-        config.set_flag(trt.BuilderFlag.GPU_FALLBACK)
+    gpu_fallback_flag = builder_flag('GPU_FALLBACK')
+    if gpu_fallback and gpu_fallback_flag is not None:
+        config.set_flag(gpu_fallback_flag)
     config.DLA_core = dla_core
-    
-    if strict_type_constraints:
-        config.set_flag(trt.BuilderFlag.STRICT_TYPES)
+
+    # STRICT_TYPES is gone from 11.x, where a strongly typed network already
+    # obeys the graph's types exactly — the request is satisfied by definition.
+    strict_types_flag = builder_flag('STRICT_TYPES')
+    if strict_type_constraints and strict_types_flag is not None:
+        config.set_flag(strict_types_flag)
+
+    calibrator = None
 
     if int8_mode:
+        int8_flag = builder_flag('INT8')
+        if int8_flag is not None:
+            config.set_flag(int8_flag)
 
-        # default to use input tensors for calibration
-        if int8_calib_dataset is None:
-            int8_calib_dataset = dataset
+        # A network that already carries Q/DQ (explicit quantization) is fully
+        # specified — calibrating it as well would fight the baked-in scales.
+        explicit_quantization = network_has_explicit_quantization(network)
 
-        config.set_flag(trt.BuilderFlag.INT8)
+        if not LEGACY_INT8_CALIBRATION_AVAILABLE:
+            # The ONNX quantizer above should have put them there; a network
+            # without them would build silently as a float engine.
+            if not explicit_quantization:
+                raise RuntimeError(
+                    f"int8_mode on TensorRT {trt.__version__} requires explicit "
+                    "quantization, but the parsed network has no Q/DQ layers — "
+                    "implicit calibration was removed in TensorRT 11.0. Convert with "
+                    "use_onnx=True and an int8_calib_dataset so the ONNX quantizer can "
+                    "insert them, or hand in an already-quantized module."
+                )
+        elif not kwargs.get('qat_mode', False) and not explicit_quantization:
+            # default to use input tensors for calibration
+            if int8_calib_dataset is None:
+                int8_calib_dataset = dataset
 
-        #Making sure not to run calibration with QAT mode on
-        if not kwargs.get('qat_mode', False):
             calibrator = DatasetCalibrator(
                 int8_calib_dataset, algorithm=int8_calib_algorithm
             )
@@ -792,7 +881,8 @@ def torch2trt(module,
         )
     config.add_optimization_profile(profile)
 
-    if int8_mode:
+    # Only an implicit-quantization calibrator needs a profile to calibrate over.
+    if calibrator is not None:
         config.set_calibration_profile(profile)
 
     # BUILD ENGINE
