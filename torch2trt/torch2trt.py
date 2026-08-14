@@ -15,8 +15,11 @@ from .precision import (
     LEGACY_INT8_CALIBRATION_AVAILABLE,
     autocast_onnx_to_fp16,
     builder_flag,
+    calibration_arrays,
+    graph_has_explicit_quantization,
     network_creation_flags,
     network_has_explicit_quantization,
+    quantize_onnx_int8,
 )
 
 from .dataset import (
@@ -612,6 +615,8 @@ def torch2trt(module,
               max_batch_size=None,
               avg_timing_iterations=None,
               fp16_op_block_list=None,
+              int8_op_block_list=None,
+              int8_calibration_eps=None,
               **kwargs):
 
     # capture arguments to provide to context
@@ -722,16 +727,47 @@ def torch2trt(module,
 
             model_proto = gs.export_onnx(onnx_graph)
 
-            # Strongly typed TensorRT has no FP16 builder flag, so the graph
-            # itself has to be FP16. AutoCast casts the compute and leaves the
-            # graph's inputs/outputs FP32, matching what callers saw when the
-            # flag did this at build time.
-            if fp16_mode and not WEAK_TYPING_AVAILABLE:
-                model_proto = autocast_onnx_to_fp16(model_proto, fp16_op_block_list)
-
             # Save manipulated graph to another temp file
             tmp_out_path = os.path.join(tmpdir, "model_out.onnx")
             external_data = save_onnx(onnx, model_proto, tmp_out_path)
+
+            # Strongly typed TensorRT takes its precision from the graph, so
+            # rewrite the graph rather than setting builder flags. Which rewrite
+            # depends on what is being asked for: the ONNX quantizer owns INT8
+            # and can cast the unquantized remainder to FP16 in the same pass,
+            # while AutoCast handles the FP16-only case. They are not
+            # interchangeable — AutoCast does not support Q/DQ graphs.
+            if not WEAK_TYPING_AVAILABLE and (fp16_mode or int8_mode):
+                pre_quantized = graph_has_explicit_quantization(model_proto)
+                if int8_mode and not pre_quantized:
+                    calib_arrays = calibration_arrays(
+                        dataset if int8_calib_dataset is None else int8_calib_dataset,
+                        input_flattener,
+                        input_names,
+                    )
+                    quantized_path = os.path.join(tmpdir, "model_int8.onnx")
+                    quantize_onnx_int8(
+                        tmp_out_path,
+                        quantized_path,
+                        calib_arrays,
+                        fp16=fp16_mode,
+                        int8_op_block_list=int8_op_block_list,
+                        fp16_op_block_list=fp16_op_block_list,
+                        calibration_eps=int8_calibration_eps,
+                        external_data=external_data,
+                    )
+                    tmp_out_path = quantized_path
+                elif pre_quantized and fp16_mode:
+                    raise RuntimeError(
+                        "The exported graph already carries Q/DQ nodes, which AutoCast "
+                        "cannot cast to FP16 (it would leave QuantizeLinear scales at a "
+                        "type its input no longer has). Either export the module in FP16 "
+                        "yourself, or pass an unquantized module plus int8_calib_dataset "
+                        "and let the ONNX quantizer do both precisions."
+                    )
+                elif fp16_mode:
+                    model_proto = autocast_onnx_to_fp16(model_proto, fp16_op_block_list)
+                    external_data = save_onnx(onnx, model_proto, tmp_out_path)
 
             # Create network and parser, and parse ONNX inside context
             network = builder.create_network(network_creation_flags())
@@ -814,13 +850,15 @@ def torch2trt(module,
         explicit_quantization = network_has_explicit_quantization(network)
 
         if not LEGACY_INT8_CALIBRATION_AVAILABLE:
+            # The ONNX quantizer above should have put them there; a network
+            # without them would build silently as a float engine.
             if not explicit_quantization:
                 raise RuntimeError(
                     f"int8_mode on TensorRT {trt.__version__} requires explicit "
-                    "quantization, but the parsed network has no Q/DQ layers. Quantize "
-                    "the module before conversion (e.g. modelopt.torch.quantization, "
-                    "which exports QuantizeLinear/DequantizeLinear through the ONNX "
-                    "exporter) — implicit calibration was removed in TensorRT 11.0."
+                    "quantization, but the parsed network has no Q/DQ layers — "
+                    "implicit calibration was removed in TensorRT 11.0. Convert with "
+                    "use_onnx=True and an int8_calib_dataset so the ONNX quantizer can "
+                    "insert them, or hand in an already-quantized module."
                 )
         elif not kwargs.get('qat_mode', False) and not explicit_quantization:
             # default to use input tensors for calibration
