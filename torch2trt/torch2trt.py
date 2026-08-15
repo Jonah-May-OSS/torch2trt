@@ -574,6 +574,12 @@ def save_onnx(onnx, model_proto, path):
     Returns True if the weights were written to an external data file next to
     the model, in which case the model can only be parsed from that path (the
     serialized bytes alone no longer carry the weights).
+
+    In that case ``model_proto`` is also rewritten in place: onnx.save() strips
+    the initializers' raw data and replaces it with a reference relative to the
+    model file. The proto is only usable by anything that resolves that
+    reference from ``os.path.dirname(path)`` — which onnx.checker, for one, does
+    not. Treat the proto as spent once it has been saved this way.
     """
     if _weights_nbytes(model_proto) < _PROTO_SIZE_LIMIT - _PROTO_SIZE_MARGIN:
         onnx.save(model_proto, path)
@@ -727,9 +733,7 @@ def torch2trt(module,
 
             model_proto = gs.export_onnx(onnx_graph)
 
-            # Save manipulated graph to another temp file
             tmp_out_path = os.path.join(tmpdir, "model_out.onnx")
-            external_data = save_onnx(onnx, model_proto, tmp_out_path)
 
             # Strongly typed TensorRT takes its precision from the graph, so
             # rewrite the graph rather than setting builder flags. Which rewrite
@@ -737,27 +741,20 @@ def torch2trt(module,
             # and can cast the unquantized remainder to FP16 in the same pass,
             # while AutoCast handles the FP16-only case. They are not
             # interchangeable — AutoCast does not support Q/DQ graphs.
+            #
+            # AutoCast runs *before* the graph is written out, because
+            # save_onnx() spills oversized weights to a sidecar by rewriting the
+            # proto in place: the initializers it hands back carry a relative
+            # external-data reference instead of their bytes. Handing that proto
+            # to AutoCast fails in onnx.checker, which resolves the reference
+            # against the process CWD rather than the model's directory. ModelOpt
+            # handles an oversized in-memory proto on its own (it spills to its
+            # own temp directory, from a deep copy), so it wants the graph with
+            # the weights still inline.
+            pre_quantized = False
             if not WEAK_TYPING_AVAILABLE and (fp16_mode or int8_mode):
                 pre_quantized = graph_has_explicit_quantization(model_proto)
-                if int8_mode and not pre_quantized:
-                    calib_arrays = calibration_arrays(
-                        dataset if int8_calib_dataset is None else int8_calib_dataset,
-                        input_flattener,
-                        input_names,
-                    )
-                    quantized_path = os.path.join(tmpdir, "model_int8.onnx")
-                    quantize_onnx_int8(
-                        tmp_out_path,
-                        quantized_path,
-                        calib_arrays,
-                        fp16=fp16_mode,
-                        int8_op_block_list=int8_op_block_list,
-                        fp16_op_block_list=fp16_op_block_list,
-                        calibration_eps=int8_calibration_eps,
-                        external_data=external_data,
-                    )
-                    tmp_out_path = quantized_path
-                elif pre_quantized and fp16_mode:
+                if pre_quantized and fp16_mode:
                     raise RuntimeError(
                         "The exported graph already carries Q/DQ nodes, which AutoCast "
                         "cannot cast to FP16 (it would leave QuantizeLinear scales at a "
@@ -765,9 +762,33 @@ def torch2trt(module,
                         "yourself, or pass an unquantized module plus int8_calib_dataset "
                         "and let the ONNX quantizer do both precisions."
                     )
-                elif fp16_mode:
+                if fp16_mode and not int8_mode:
                     model_proto = autocast_onnx_to_fp16(model_proto, fp16_op_block_list)
-                    external_data = save_onnx(onnx, model_proto, tmp_out_path)
+
+            # Save the manipulated graph to another temp file. From here on the
+            # graph is consumed by path, so the sidecar (if any) resolves.
+            external_data = save_onnx(onnx, model_proto, tmp_out_path)
+
+            # INT8 is the one rewrite the quantizer does by path, so it runs
+            # after the save.
+            if not WEAK_TYPING_AVAILABLE and int8_mode and not pre_quantized:
+                calib_arrays = calibration_arrays(
+                    dataset if int8_calib_dataset is None else int8_calib_dataset,
+                    input_flattener,
+                    input_names,
+                )
+                quantized_path = os.path.join(tmpdir, "model_int8.onnx")
+                quantize_onnx_int8(
+                    tmp_out_path,
+                    quantized_path,
+                    calib_arrays,
+                    fp16=fp16_mode,
+                    int8_op_block_list=int8_op_block_list,
+                    fp16_op_block_list=fp16_op_block_list,
+                    calibration_eps=int8_calibration_eps,
+                    external_data=external_data,
+                )
+                tmp_out_path = quantized_path
 
             # Create network and parser, and parse ONNX inside context
             network = builder.create_network(network_creation_flags())
@@ -891,6 +912,20 @@ def torch2trt(module,
         engine = builder.build_engine(network, config)
     else:
         engine = builder.build_serialized_network(network, config)
+
+    # A failed build (most often the GPU running out of memory while TensorRT
+    # times tactics) is reported by returning None, having logged the cause
+    # through the TRT logger. Left alone it travels as far as the first
+    # attribute access on the engine — serialize() when the module is
+    # checkpointed — and reports itself as an AttributeError on NoneType, an
+    # unrelated-looking failure a long way from the actual error.
+    if engine is None:
+        raise RuntimeError(
+            "TensorRT failed to build an engine; see the TensorRT log above for "
+            "the cause. An out-of-memory error there means the build needed more "
+            "device memory than was free — free the GPU or lower "
+            "max_workspace_size and retry."
+        )
 
     module_trt = TRTModule(engine, input_names, output_names, input_flattener=input_flattener, output_flattener=output_flattener)
 
