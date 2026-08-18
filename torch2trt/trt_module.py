@@ -10,10 +10,82 @@ from .version_utils import (
 )
 
 
+class SharedDeviceMemory:
+    """One device scratch buffer shared by several execution contexts.
+
+    By default each :class:`IExecutionContext` owns a private device-memory
+    pool sized for its engine's worst-case layer scratch. A model split across
+    several engines therefore reserves that scratch once per engine even though
+    only one context is ever executing, which on multi-engine models is a
+    material share of resident VRAM.
+
+    Passing a pool to :class:`TRTModule` makes every context draw from a single
+    buffer sized to the largest engine in the group instead of the sum.
+
+    Contexts sharing a pool must not execute concurrently: the buffer is live
+    for the duration of ``enqueue_v3``, so two contexts running at once would
+    scribble over each other. Sequential execution on one stream -- the usual
+    encoder-then-decoder pipeline -- is exactly the safe case. Do not share a
+    pool between contexts driven from different threads or streams.
+    """
+
+    def __init__(self, device=None):
+        self._device = device
+        self._buffer = None
+        self._contexts = []
+
+    @property
+    def nbytes(self):
+        """Bytes currently reserved (0 before the first engine is added)."""
+        return 0 if self._buffer is None else self._buffer.numel()
+
+    @staticmethod
+    def _engine_nbytes(engine):
+        # device_memory_size is deprecated in TRT 10 in favour of the _v2 form,
+        # which accounts for engines whose scratch depends on the chosen shapes.
+        size = getattr(engine, "device_memory_size_v2", None)
+        return int(size if size is not None else engine.device_memory_size)
+
+    def add(self, engine):
+        """Create a context for ``engine`` that draws on this shared buffer."""
+        context = engine.create_execution_context_without_device_memory()
+        if context is None:
+            raise RuntimeError(
+                "TensorRT refused to create an execution context without device "
+                "memory; the engine cannot use a shared device-memory pool."
+            )
+        self._contexts.append(context)
+        self._reserve(self._engine_nbytes(engine))
+        return context
+
+    def _reserve(self, nbytes):
+        if nbytes <= self.nbytes and self._buffer is not None:
+            self._bind(self._contexts[-1:])
+            return
+        # Growing means a new allocation, so every context already bound to the
+        # old buffer is now pointing at memory the allocator may hand out again.
+        # Re-bind all of them, and only drop the old buffer afterwards.
+        previous = self._buffer
+        self._buffer = torch.empty(
+            max(nbytes, 1), dtype=torch.uint8, device=self._device or "cuda"
+        )
+        self._bind(self._contexts)
+        del previous
+
+    def _bind(self, contexts):
+        address = self._buffer.data_ptr()
+        size = self._buffer.numel()
+        for context in contexts:
+            context.set_device_memory(address, size)
+
+
 class TRTModule(torch.nn.Module):
-    def __init__(self, engine=None, input_names=None, output_names=None, input_flattener=None, output_flattener=None):
+    def __init__(self, engine=None, input_names=None, output_names=None, input_flattener=None, output_flattener=None, device_memory=None):
         super(TRTModule, self).__init__()
         self._register_state_dict_hook(TRTModule._on_state_dict)
+        # Optional SharedDeviceMemory; when set, this module's context draws its
+        # scratch from the pool instead of reserving a private one.
+        self.device_memory = device_memory
 
         if isinstance(engine, str):
             # assume filepath
@@ -27,13 +99,18 @@ class TRTModule(torch.nn.Module):
             
         self.engine = engine
         if self.engine is not None:
-            self.context = self.engine.create_execution_context()
+            self.context = self._create_context()
             self._update_name_binindgs_maps()
         self.input_names = input_names
         self.output_names = output_names
         self.input_flattener = input_flattener
         self.output_flattener = output_flattener
     
+    def _create_context(self):
+        if getattr(self, "device_memory", None) is not None:
+            return self.device_memory.add(self.engine)
+        return self.engine.create_execution_context()
+
     def _update_name_binindgs_maps(self):
         if trt_version() >= "10.0":
             self._update_name_binding_maps_trt_10()
@@ -77,7 +154,8 @@ class TRTModule(torch.nn.Module):
 
         with trt.Logger() as logger, trt.Runtime(logger) as runtime:
             self.engine = runtime.deserialize_cuda_engine(engine_bytes)
-            self.context = self.engine.create_execution_context()
+            if self.engine is not None:
+                self.context = self._create_context()
 
         self.input_names = state_dict[prefix + "input_names"]
         self.output_names = state_dict[prefix + "output_names"]

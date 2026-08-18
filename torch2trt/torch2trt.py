@@ -30,7 +30,7 @@ from .dataset import (
 from .flattener import Flattener
 from .flatten_module import Flatten
 from .version_utils import trt_version
-from .trt_module import TRTModule
+from .trt_module import TRTModule, SharedDeviceMemory
 from .misc_utils import (
     torch_device_to_trt,
     torch_dtype_to_trt,
