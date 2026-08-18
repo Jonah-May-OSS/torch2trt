@@ -1,3 +1,5 @@
+import logging
+
 import torch
 import tensorrt as trt
 from .flattener import Flattener
@@ -8,6 +10,8 @@ from .misc_utils import (
 from .version_utils import (
     trt_version
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SharedDeviceMemory:
@@ -46,22 +50,82 @@ class SharedDeviceMemory:
         size = getattr(engine, "device_memory_size_v2", None)
         return int(size if size is not None else engine.device_memory_size)
 
+    @staticmethod
+    def _new_user_managed_context(engine):
+        """Create a context whose device memory the application supplies.
+
+        How you ask for one has changed twice, so all three spellings are tried
+        newest first: the runtime-config route is what TensorRT 11 documents and
+        10.x also accepts, the allocation-strategy argument is the 10.x form, and
+        createExecutionContextWithoutDeviceMemory is the pre-10 entry point --
+        deprecated in 10.0 and *removed* in 11.0, so it must never be the only
+        path. Returns None when none of them are available.
+        """
+        strategy = getattr(trt, "ExecutionContextAllocationStrategy", None)
+        user_managed = getattr(strategy, "USER_MANAGED", None)
+
+        if user_managed is not None and hasattr(engine, "create_runtime_config"):
+            runtime_config = engine.create_runtime_config()
+            runtime_config.set_execution_context_allocation_strategy(user_managed)
+            return engine.create_execution_context(runtime_config)
+
+        if user_managed is not None:
+            return engine.create_execution_context(user_managed)
+
+        legacy = getattr(
+            engine, "create_execution_context_without_device_memory", None
+        )
+        return legacy() if legacy is not None else None
+
+    @staticmethod
+    def _bind_context(context, address, size):
+        """Point one context at ``address``; False when TensorRT has no setter.
+
+        set_device_memory_v2 carries the buffer size and is the TensorRT 11
+        spelling; the sizeless-then-sized set_device_memory is the 10.x one.
+        """
+        setter = getattr(context, "set_device_memory_v2", None) or getattr(
+            context, "set_device_memory", None
+        )
+        if setter is None:
+            return False
+        setter(address, size)
+        return True
+
     def add(self, engine):
-        """Create a context for ``engine`` that draws on this shared buffer."""
-        context = engine.create_execution_context_without_device_memory()
+        """Create a context for ``engine`` that draws on this shared buffer.
+
+        Returns None when this TensorRT cannot hand out a context with
+        application-supplied memory, leaving it to the caller to fall back to a
+        private pool. Sharing is an optimization, so an unsupported TensorRT has
+        to cost footprint, never the load itself.
+        """
+        try:
+            context = self._new_user_managed_context(engine)
+        except (AttributeError, TypeError) as err:
+            # A route that exists but does not accept what we pass it. Treated
+            # the same as absent rather than propagating, for the reason above.
+            logger.debug("User-managed execution context unavailable: %s", err)
+            return None
         if context is None:
-            raise RuntimeError(
-                "TensorRT refused to create an execution context without device "
-                "memory; the engine cannot use a shared device-memory pool."
+            logger.debug(
+                "This TensorRT cannot create a user-managed execution context; "
+                "the engine keeps a private device-memory pool."
             )
+            return None
+
         self._contexts.append(context)
-        self._reserve(self._engine_nbytes(engine))
+        if not self._reserve(self._engine_nbytes(engine)):
+            # No way to point the context at our buffer, so it has no memory at
+            # all: drop it and let the caller make a normally-allocated one.
+            self._contexts.pop()
+            return None
         return context
 
     def _reserve(self, nbytes):
-        if nbytes <= self.nbytes and self._buffer is not None:
-            self._bind(self._contexts[-1:])
-            return
+        """Ensure the buffer holds ``nbytes`` and every context points at it."""
+        if self._buffer is not None and nbytes <= self.nbytes:
+            return self._bind(self._contexts[-1:])
         # Growing means a new allocation, so every context already bound to the
         # old buffer is now pointing at memory the allocator may hand out again.
         # Re-bind all of them, and only drop the old buffer afterwards.
@@ -69,14 +133,16 @@ class SharedDeviceMemory:
         self._buffer = torch.empty(
             max(nbytes, 1), dtype=torch.uint8, device=self._device or "cuda"
         )
-        self._bind(self._contexts)
+        bound = self._bind(self._contexts)
         del previous
+        return bound
 
     def _bind(self, contexts):
         address = self._buffer.data_ptr()
         size = self._buffer.numel()
-        for context in contexts:
-            context.set_device_memory(address, size)
+        # A list, not a generator: all() short-circuits, and every context must
+        # actually be bound rather than abandoned after the first failure.
+        return all([self._bind_context(context, address, size) for context in contexts])
 
 
 class TRTModule(torch.nn.Module):
@@ -107,8 +173,13 @@ class TRTModule(torch.nn.Module):
         self.output_flattener = output_flattener
     
     def _create_context(self):
-        if getattr(self, "device_memory", None) is not None:
-            return self.device_memory.add(self.engine)
+        pool = getattr(self, "device_memory", None)
+        if pool is not None:
+            context = pool.add(self.engine)
+            if context is not None:
+                return context
+            # Sharing is unsupported here. A private pool per context runs
+            # correctly, just with the footprint sharing was meant to avoid.
         return self.engine.create_execution_context()
 
     def _update_name_binindgs_maps(self):
