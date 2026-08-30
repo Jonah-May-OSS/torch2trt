@@ -249,11 +249,21 @@ class TRTModule(torch.nn.Module):
         if self.input_flattener is not None:
             inputs = self.input_flattener.flatten(inputs)
 
+        # TensorRT records only the raw address of each input, so every
+        # tensor it points at must stay alive until the enqueue below returns.
+        # A non-contiguous input makes .contiguous() a fresh copy; without a
+        # reference that copy is freed at the end of the statement and torch's
+        # caching allocator can hand the block straight to the output
+        # allocations that follow, leaving the engine to read its own output as
+        # input. ``held`` keeps them alive; it is load-bearing, not dead code,
+        # and must stay in scope until this method returns.
+        held = []
         for i, input_name in enumerate(self.input_names):
             idx = self.engine.get_binding_index(input_name)
-            shape = tuple(inputs[i].shape)
-            bindings[idx] = inputs[i].contiguous().data_ptr()
-            self.context.set_binding_shape(idx, shape)
+            contiguous = inputs[i].contiguous()
+            held.append(contiguous)
+            bindings[idx] = contiguous.data_ptr()
+            self.context.set_binding_shape(idx, tuple(contiguous.shape))
 
         # create output tensors
         outputs = [None] * len(self.output_names)
@@ -284,11 +294,20 @@ class TRTModule(torch.nn.Module):
             inputs = self.input_flattener.flatten(inputs)
 
         # set shapes
+        # TensorRT records only the raw address of each input, so every
+        # tensor it points at must stay alive until the enqueue below returns.
+        # A non-contiguous input makes .contiguous() a fresh copy; without a
+        # reference that copy is freed at the end of the statement and torch's
+        # caching allocator can hand the block straight to the output
+        # allocations that follow, leaving the engine to read its own output as
+        # input. ``held`` keeps them alive; it is load-bearing, not dead code,
+        # and must stay in scope until this method returns.
+        held = []
         for i, input_name in enumerate(self.input_names):
-            shape = tuple(inputs[i].shape)
-            data_ptr = inputs[i].contiguous().data_ptr()
-            self.context.set_tensor_address(input_name, data_ptr)
-            self.context.set_input_shape(input_name, shape)
+            contiguous = inputs[i].contiguous()
+            held.append(contiguous)
+            self.context.set_tensor_address(input_name, contiguous.data_ptr())
+            self.context.set_input_shape(input_name, tuple(contiguous.shape))
 
         # execute
         outputs = [None] * len(self.output_names)
