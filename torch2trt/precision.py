@@ -28,6 +28,7 @@ __all__ = [
     'autocast_onnx_to_fp16',
     'builder_flag',
     'calibration_arrays',
+    'calibration_shapes_spec',
     'graph_has_explicit_quantization',
     'network_creation_flags',
     'network_has_explicit_quantization',
@@ -139,6 +140,39 @@ def calibration_arrays(calib_dataset, flattener, input_names):
     return {name: np.concatenate(arrays, axis=0) for name, arrays in columns.items()}
 
 
+def calibration_shapes_spec(calib_dataset, flattener, input_names):
+    """Per-iteration shape of each graph input, in ModelOpt's shapes-spec form.
+
+    ModelOpt derives its calibration iteration count from *only the first* graph
+    input, as ``calib_array.shape[0] // input_shape[0]``, and infers that shape
+    from the ONNX graph with every dynamic dim filled in as 1. An input carrying
+    no batch axis breaks that: Whisper's ``positional_embedding`` is (1500, 512)
+    stacked once per item, so a six-item set concatenates to (9000, 512) while
+    the inferred leading dim is 1 -- and the count comes out 9000 instead of 6.
+    ``np.array_split`` then yields six real batches followed by empty ones, and
+    calibration dies on the seventh with a zero-length input.
+
+    Stating the real per-item shapes removes the guess, and does so regardless
+    of which input the graph happens to list first.
+
+    Returns None when the items disagree on a shape, which leaves ModelOpt's own
+    inference in place rather than asserting something that does not hold.
+    """
+    if not len(calib_dataset):
+        return None
+    shapes = {}
+    for index in range(len(calib_dataset)):
+        tensors = flattener.flatten(calib_dataset[index])
+        for name, tensor in zip(input_names, tensors):
+            shape = tuple(tensor.shape)
+            if shapes.setdefault(str(name), shape) != shape:
+                return None
+    return ','.join(
+        '{}:{}'.format(name, 'x'.join(str(d) for d in shape))
+        for name, shape in shapes.items()
+    )
+
+
 def quantize_onnx_int8(
     onnx_path,
     output_path,
@@ -148,6 +182,7 @@ def quantize_onnx_int8(
     fp16_op_block_list=None,
     calibration_eps=None,
     external_data=False,
+    calibration_shapes=None,
 ):
     """Rewrite an FP32 ONNX model as INT8 Q/DQ, optionally FP16 elsewhere.
 
@@ -162,6 +197,10 @@ def quantize_onnx_int8(
     ``int8_op_block_list`` leaves op types unquantized; ``fp16_op_block_list``
     leaves op types in FP32 — the two escape hatches for a layer that cannot
     take the respective precision.
+
+    ``calibration_shapes`` states each input's per-iteration shape so the
+    quantizer does not have to infer it from the graph; see
+    ``calibration_shapes_spec`` for why inference is not reliable.
     """
     try:
         from modelopt.onnx.quantization import quantize
@@ -177,6 +216,7 @@ def quantize_onnx_int8(
         quantize_mode='int8',
         calibration_data=calib_arrays,
         calibration_eps=list(calibration_eps or ['cpu']),
+        calibration_shapes=calibration_shapes,
         high_precision_dtype='fp16' if fp16 else 'fp32',
         op_types_to_exclude=list(int8_op_block_list) if int8_op_block_list else None,
         op_types_to_exclude_fp16=list(fp16_op_block_list) if fp16_op_block_list else None,
