@@ -145,6 +145,29 @@ class SharedDeviceMemory:
         return all([self._bind_context(context, address, size) for context in contexts])
 
 
+def _describe_profile(engine, context, name):
+    """Return the optimization-profile bounds for input ``name``, if any."""
+    try:
+        index = context.active_optimization_profile
+        low, opt, high = engine.get_tensor_profile_shape(name, index)
+    except Exception:  # pragma: no cover - varies across TRT versions
+        return "profile unknown"
+    return f"profile min={tuple(low)} opt={tuple(opt)} max={tuple(high)}"
+
+
+def _describe_io(engine, context):
+    """Return a per-tensor summary of the context's current shapes."""
+    lines = []
+    for i in range(engine.num_io_tensors):
+        name = engine.get_tensor_name(i)
+        try:
+            shape = tuple(context.get_tensor_shape(name))
+        except Exception:  # pragma: no cover - varies across TRT versions
+            shape = "unknown"
+        lines.append(f"  {name}: {shape}")
+    return "\n".join(lines)
+
+
 class TRTModule(torch.nn.Module):
     def __init__(self, engine=None, input_names=None, output_names=None, input_flattener=None, output_flattener=None, device_memory=None):
         super(TRTModule, self).__init__()
@@ -263,7 +286,11 @@ class TRTModule(torch.nn.Module):
             contiguous = inputs[i].contiguous()
             held.append(contiguous)
             bindings[idx] = contiguous.data_ptr()
-            self.context.set_binding_shape(idx, tuple(contiguous.shape))
+            shape = tuple(contiguous.shape)
+            if not self.context.set_binding_shape(idx, shape):
+                raise RuntimeError(
+                    f"TensorRT rejected shape {shape} for input '{input_name}'."
+                )
 
         # create output tensors
         outputs = [None] * len(self.output_names)
@@ -276,9 +303,13 @@ class TRTModule(torch.nn.Module):
             outputs[i] = output
             bindings[idx] = output.data_ptr()
 
-        self.context.execute_async_v2(
+        if not self.context.execute_async_v2(
             bindings, torch.cuda.current_stream().cuda_stream
-        )
+        ):
+            raise RuntimeError(
+                "TensorRT failed to enqueue the engine; the output tensors hold "
+                "uninitialised memory."
+            )
 
         if self.output_flattener is not None:
             outputs = self.output_flattener.unflatten(outputs)
@@ -306,8 +337,23 @@ class TRTModule(torch.nn.Module):
         for i, input_name in enumerate(self.input_names):
             contiguous = inputs[i].contiguous()
             held.append(contiguous)
-            self.context.set_tensor_address(input_name, contiguous.data_ptr())
-            self.context.set_input_shape(input_name, tuple(contiguous.shape))
+            shape = tuple(contiguous.shape)
+            # These return a status rather than raising. Ignoring it is how a
+            # rejected shape turns into silent corruption: the context keeps
+            # its previous shape, the enqueue below does nothing, and the
+            # freshly allocated (uninitialised) output tensor is returned as if
+            # it held results -- frequently containing the previous call's
+            # output, since the allocator hands back the block just freed.
+            if not self.context.set_tensor_address(input_name, contiguous.data_ptr()):
+                raise RuntimeError(
+                    f"TensorRT rejected the address for input '{input_name}'."
+                )
+            if not self.context.set_input_shape(input_name, shape):
+                raise RuntimeError(
+                    f"TensorRT rejected shape {shape} for input '{input_name}' "
+                    f"({_describe_profile(self.engine, self.context, input_name)}). "
+                    "The engine cannot run at this shape."
+                )
 
         # execute
         outputs = [None] * len(self.output_names)
@@ -315,11 +361,28 @@ class TRTModule(torch.nn.Module):
             dtype = torch_dtype_from_trt(self.engine.get_tensor_dtype(output_name))
             shape = tuple(self.context.get_tensor_shape(output_name))
             device = torch_device_from_trt(self.engine.get_tensor_location(output_name))
+            # A negative extent means TRT could not resolve this output from the
+            # inputs set above. Allocating on it would silently size the buffer
+            # wrong, so stop here instead.
+            if any(dim < 0 for dim in shape):
+                raise RuntimeError(
+                    f"TensorRT left output '{output_name}' with unresolved shape "
+                    f"{shape}. Current context I/O:\n"
+                    f"{_describe_io(self.engine, self.context)}"
+                )
             output = torch.empty(size=shape, dtype=dtype, device=device)
             outputs[i] = output
-            self.context.set_tensor_address(output_name, output.data_ptr())
+            if not self.context.set_tensor_address(output_name, output.data_ptr()):
+                raise RuntimeError(
+                    f"TensorRT rejected the address for output '{output_name}'."
+                )
 
-        self.context.execute_async_v3(torch.cuda.current_stream().cuda_stream)
+        if not self.context.execute_async_v3(torch.cuda.current_stream().cuda_stream):
+            raise RuntimeError(
+                "TensorRT failed to enqueue the engine; the output tensors hold "
+                "uninitialised memory. Current context I/O:\n"
+                f"{_describe_io(self.engine, self.context)}"
+            )
 
         if self.output_flattener is not None:
             outputs = self.output_flattener.unflatten(outputs)
