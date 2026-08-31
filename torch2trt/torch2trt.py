@@ -16,6 +16,7 @@ from .precision import (
     autocast_onnx_to_fp16,
     builder_flag,
     calibration_arrays,
+    calibration_shapes_spec,
     graph_has_explicit_quantization,
     network_creation_flags,
     network_has_explicit_quantization,
@@ -772,8 +773,16 @@ def torch2trt(module,
             # INT8 is the one rewrite the quantizer does by path, so it runs
             # after the save.
             if not WEAK_TYPING_AVAILABLE and int8_mode and not pre_quantized:
+                calib_dataset = (
+                    dataset if int8_calib_dataset is None else int8_calib_dataset
+                )
                 calib_arrays = calibration_arrays(
-                    dataset if int8_calib_dataset is None else int8_calib_dataset,
+                    calib_dataset,
+                    input_flattener,
+                    input_names,
+                )
+                calib_shapes = calibration_shapes_spec(
+                    calib_dataset,
                     input_flattener,
                     input_names,
                 )
@@ -787,6 +796,7 @@ def torch2trt(module,
                     fp16_op_block_list=fp16_op_block_list,
                     calibration_eps=int8_calibration_eps,
                     external_data=external_data,
+                    calibration_shapes=calib_shapes,
                 )
                 tmp_out_path = quantized_path
 
