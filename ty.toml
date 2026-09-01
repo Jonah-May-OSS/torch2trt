@@ -2,7 +2,16 @@
 # build tree are not part of the shipped package.
 [src]
 include = ["torch2trt"]
-exclude = ["build", "examples", "scripts", "tests", "**/__pycache__"]
+exclude = [
+    "build",
+    "examples",
+    "scripts",
+    "tests",
+    "**/__pycache__",
+    # Optional visualisation helper; graphviz is not a runtime dependency and
+    # is not installed in the checked environment.
+    "torch2trt/utils.py",
+]
 
 [environment]
 python-version = "3.12"

@@ -1,6 +1,12 @@
 import tensorrt as trt
 
-from torch2trt.torch2trt import *
+from torch2trt.torch2trt import (
+    add_missing_trt_tensors,
+    tensorrt_converter,
+)
+from torch2trt.version_utils import (
+    trt_version,
+)
 
 
 @tensorrt_converter(

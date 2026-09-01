@@ -1,7 +1,31 @@
 import collections.abc
 import math
 
-from torch2trt.torch2trt import *
+import numpy as np
+import tensorrt as trt
+import torch
+
+from torch2trt.misc_utils import (
+    torch_dtype_from_trt,
+    torch_dtype_to_trt,
+    trt_int_dtype,
+)
+from torch2trt.torch2trt import (
+    IntWrapper,
+    add_missing_trt_tensors,
+    broadcast_trt_tensors,
+    get_arg,
+    make_int_wrapper,
+    make_size_wrapper,
+    set_layer_precision,
+    tensorrt_converter,
+    torch_dim_resolve_negative,
+    torch_dim_to_trt_axes,
+    trt_,
+)
+from torch2trt.version_utils import (
+    trt_version,
+)
 
 
 @tensorrt_converter("torch.nn.functional.leaky_relu")

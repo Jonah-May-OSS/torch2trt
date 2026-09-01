@@ -26,13 +26,6 @@ select = [
 ]
 ignore = [
     "E501",   # line too long (handled by the formatter)
-    # torch2trt is built on star imports: `from .converters import *` is how
-    # the converter registry is populated, and every converter module re-exports
-    # through one. These two rules account for 683 of 699 findings here, and
-    # clearing them would mean rewriting the library's import architecture --
-    # which is upstream NVIDIA design, not a defect. Everything else is fixed.
-    "F403",   # star import used
-    "F405",   # name may be undefined, or defined from a star import
 ]
 
 [lint.per-file-ignores]

@@ -1,9 +1,13 @@
 import ctypes
 
 import numpy as np
+import tensorrt as trt
 from torch import nn
 
-from torch2trt.torch2trt import *
+from torch2trt.torch2trt import (
+    get_arg,
+    tensorrt_converter,
+)
 
 try:
     ctypes.CDLL("libtorch2trt_plugins.so")
