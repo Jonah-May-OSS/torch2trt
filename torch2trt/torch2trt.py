@@ -603,6 +603,30 @@ def save_onnx(onnx, model_proto, path):
     return True
 
 
+class _ErrorRecordingLogger(trt.Logger):
+    """A TensorRT logger that keeps the errors it prints.
+
+    TensorRT reports a failed build by returning None from
+    build_serialized_network, having sent the reason to the logger and nowhere
+    else. Without keeping those messages the exception can only say "see the
+    log above" and then guess at the cause -- which is how a build that failed
+    on an internal assertion came to be reported as an out-of-memory problem,
+    and why a caller matching on TensorRT's own wording (whisper-trt has such a
+    check, for exactly the OOM case) never saw the text it was looking for.
+    """
+
+    def __init__(self, min_severity: Any = trt.Logger.ERROR) -> None:
+        super().__init__(min_severity)
+        # ERROR is 1 and INTERNAL_ERROR is 0, so <= ERROR is both of them.
+        self.errors: list[str] = []
+
+    def log(self, severity: Any, msg: str) -> None:
+        """Record errors on the way past; printing is unchanged."""
+        if severity <= trt.Logger.ERROR:
+            self.errors.append(str(msg))
+        super().log(severity, msg)
+
+
 def torch2trt(
     module,
     inputs,
@@ -696,7 +720,7 @@ def torch2trt(
             if len(value) > 0:
                 raise ValueError("Dataset cannot have multiple shapes when using DLA")
 
-    logger = trt.Logger(log_level)
+    logger = _ErrorRecordingLogger(log_level)
     builder = trt.Builder(logger)
     config = builder.create_builder_config()
 
@@ -718,7 +742,7 @@ def torch2trt(
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_in_path = os.path.join(tmpdir, "model_in.onnx")
 
-            # Check PyTorch version to use legacy ONNX exporter for 2.9+
+            # Which ONNX exporter to use. See the note on the dynamo pin below.
             torch_version = tuple(
                 int(x) for x in torch.__version__.split("+")[0].split(".")[:2]
             )
@@ -738,7 +762,23 @@ def torch2trt(
                 },
             }
 
-            # Force legacy ONNX exporter for PyTorch 2.9+ to avoid torch.export issues
+            # Pin the TorchScript exporter on 2.9+, where dynamo became the
+            # default. It emits a DeprecationWarning, and that is the lesser
+            # problem: the dynamo path routes through torch.export, which
+            # specializes away the dynamic axes this conversion exists to
+            # produce. Exporting a module whose input has a dynamic axis and
+            # which adds a fixed-length tensor along it fails with
+            #
+            #   Constraints violated (frames)! You marked frames as dynamic
+            #   but your code specialized it to be a constant (20).
+            #
+            # (both strict=False and strict=True). Anything shaped like a
+            # Whisper encoder -- a variable number of frames added to a
+            # positional embedding -- hits this, so the choice is between a
+            # deprecation warning and losing dynamic shapes entirely.
+            #
+            # Recheck when torch.export stops specializing that pattern; the
+            # legacy exporter will not last forever.
             if torch_version >= (2, 9):
                 export_args["dynamo"] = False
             if onnx_opset is not None:
@@ -944,12 +984,17 @@ def torch2trt(
     # checkpointed — and reports itself as an AttributeError on NoneType, an
     # unrelated-looking failure a long way from the actual error.
     if engine is None:
-        raise RuntimeError(
-            "TensorRT failed to build an engine; see the TensorRT log above for "
-            "the cause. An out-of-memory error there means the build needed more "
-            "device memory than was free — free the GPU or lower "
-            "max_workspace_size and retry."
+        # Pass TensorRT's own words on rather than characterising the failure
+        # here: this code cannot tell an out-of-memory build from an internal
+        # assertion, and callers match on TensorRT's wording to decide what to
+        # advise.
+        reported = getattr(logger, "errors", None)
+        detail = (
+            " TensorRT reported: " + " | ".join(reported[-3:])
+            if reported
+            else " See the TensorRT log above for the cause."
         )
+        raise RuntimeError("TensorRT failed to build an engine." + detail)
 
     module_trt = TRTModule(
         engine,
