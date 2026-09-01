@@ -331,11 +331,6 @@ class NetworkWrapper:
                 device_type = trt.DeviceType.GPU  # layer will fall back to GPU
 
             # set layer name
-            def arg_str(arg):
-                if isinstance(arg, torch.Tensor):
-                    return f"tensor(shape={list(arg.shape)!s}, dtype={arg.dtype!s})"
-                return str(arg)
-
             scope_name = self._ctx.current_module_name()  # + ':' + layer.type.name
             self._layer_counts[scope_name] += 1
             layer.name = (
