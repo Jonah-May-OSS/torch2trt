@@ -1,5 +1,6 @@
 from tempfile import mkdtemp
 
+import pytest
 import torch
 from torch import nn
 
@@ -41,6 +42,9 @@ def test_dataset_infer_dynamic_axes():
     assert dynamic_axes[1] == [1]
 
 
+# Records a real conversion, which needs a device; the dataset tests above
+# are pure Python and run anywhere.
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a CUDA GPU")
 def test_tensor_batch_dataset_record():
 
     dataset = TensorBatchDataset()
@@ -71,6 +75,9 @@ def test_tensor_batch_dataset_record():
     assert dataset[0][1].shape == (1, 3, 32, 32)
 
 
+# Records a real conversion, which needs a device; the dataset tests above
+# are pure Python and run anywhere.
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a CUDA GPU")
 def test_list_dataset_record():
 
     dataset = ListDataset()
@@ -101,6 +108,9 @@ def test_list_dataset_record():
     assert dataset[0][1].shape == (1, 3, 32, 32)
 
 
+# Records a real conversion, which needs a device; the dataset tests above
+# are pure Python and run anywhere.
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a CUDA GPU")
 def test_folder_dataset_record():
 
     dataset = FolderDataset(mkdtemp())

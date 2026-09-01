@@ -1,7 +1,23 @@
+import pytest
 import torch
-from timm.models.maxxvit import maxvit_rmlp_small_rw_224, maxvit_tiny_rw_224
 
 import torch2trt
+
+# timm is not a torch2trt dependency; it only supplies the models under test.
+# importorskip turns a missing optional dep into a skip, rather than a
+# collection error -- and a collection error aborts the entire run, so one
+# absent optional package took all 286 tests down with it.
+maxxvit = pytest.importorskip("timm.models.maxxvit")
+maxvit_tiny_rw_224 = maxxvit.maxvit_tiny_rw_224
+maxvit_rmlp_pico_rw_256 = maxxvit.maxvit_rmlp_pico_rw_256
+maxvit_rmlp_small_rw_224 = maxxvit.maxvit_rmlp_small_rw_224
+
+# TensorRT conversion needs a device to build and run engines on, so every
+# test in this module requires one. Without the skip these fail rather than
+# skip, which makes a CPU-only run indistinguishable from a broken one.
+pytestmark = pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="requires a CUDA GPU"
+)
 
 
 def _cross_validate_module(model, shape=(224, 224)):

@@ -5,6 +5,13 @@ from torch import nn
 import torch2trt
 from torch2trt.flattener import Flattener
 
+# TensorRT conversion needs a device to build and run engines on, so every
+# test in this module requires one. Without the skip these fail rather than
+# skip, which makes a CPU-only run indistinguishable from a broken one.
+pytestmark = pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="requires a CUDA GPU"
+)
+
 
 def cross_validate(module, inputs, fp16_mode: bool, tol: float):
 

@@ -1,7 +1,19 @@
+import pytest
 import torch
-import torchvision
 
 import torch2trt
+
+# torchvision is not a torch2trt dependency; it only supplies the models
+# under test. importorskip turns a missing optional dep into a skip, rather
+# than a collection error -- and a collection error aborts the entire run.
+torchvision = pytest.importorskip("torchvision")
+
+# TensorRT conversion needs a device to build and run engines on, so every
+# test in this module requires one. Without the skip these fail rather than
+# skip, which makes a CPU-only run indistinguishable from a broken one.
+pytestmark = pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="requires a CUDA GPU"
+)
 
 
 class ModelWrapper(torch.nn.Module):
