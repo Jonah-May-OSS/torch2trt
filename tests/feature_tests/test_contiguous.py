@@ -1,4 +1,5 @@
 import torch
+
 from torch2trt import torch2trt
 
 
@@ -20,4 +21,3 @@ def test_contiguous():
 
     delta = torch.max((test_out.contiguous() - test_trt_out.contiguous()).abs())
     assert delta < 1e-3, f"Delta: {delta}"
-

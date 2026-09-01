@@ -23,27 +23,27 @@ version number, so one code path covers 8.x through 11.x.
 import tensorrt as trt
 
 __all__ = [
-    'LEGACY_INT8_CALIBRATION_AVAILABLE',
-    'WEAK_TYPING_AVAILABLE',
-    'autocast_onnx_to_fp16',
-    'builder_flag',
-    'calibration_arrays',
-    'calibration_shapes_spec',
-    'graph_has_explicit_quantization',
-    'network_creation_flags',
-    'network_has_explicit_quantization',
-    'quantize_onnx_int8',
+    "LEGACY_INT8_CALIBRATION_AVAILABLE",
+    "WEAK_TYPING_AVAILABLE",
+    "autocast_onnx_to_fp16",
+    "builder_flag",
+    "calibration_arrays",
+    "calibration_shapes_spec",
+    "graph_has_explicit_quantization",
+    "network_creation_flags",
+    "network_has_explicit_quantization",
+    "quantize_onnx_int8",
 ]
 
 
 # True while the per-precision builder flags exist (TensorRT <= 10.x).
-WEAK_TYPING_AVAILABLE = hasattr(trt.BuilderFlag, 'FP16')
+WEAK_TYPING_AVAILABLE = hasattr(trt.BuilderFlag, "FP16")
 
 # True while implicit INT8 quantization exists (TensorRT <= 10.x). Probed as a
 # pair because TensorRT 11 removed the calibrator interface and the calibration
 # algorithm enum together.
-LEGACY_INT8_CALIBRATION_AVAILABLE = (
-    hasattr(trt, 'IInt8Calibrator') and hasattr(trt, 'CalibrationAlgoType')
+LEGACY_INT8_CALIBRATION_AVAILABLE = hasattr(trt, "IInt8Calibrator") and hasattr(
+    trt, "CalibrationAlgoType"
 )
 
 
@@ -53,7 +53,7 @@ def network_creation_flags():
     ``EXPLICIT_BATCH`` was the only sane mode from 8.x on, became implicit in
     10.x, and no longer exists as a flag once every network is strongly typed.
     """
-    flag = getattr(trt.NetworkDefinitionCreationFlag, 'EXPLICIT_BATCH', None)
+    flag = getattr(trt.NetworkDefinitionCreationFlag, "EXPLICIT_BATCH", None)
     return 0 if flag is None else 1 << int(flag)
 
 
@@ -69,7 +69,7 @@ def graph_has_explicit_quantization(model_proto):
     quantizer's FP16 handling rather than AutoCast's.
     """
     return any(
-        node.op_type in ('QuantizeLinear', 'DequantizeLinear')
+        node.op_type in ("QuantizeLinear", "DequantizeLinear")
         for node in model_proto.graph.node
     )
 
@@ -80,7 +80,7 @@ def network_has_explicit_quantization(network):
     Used to tell a network that was quantized before the build (Q/DQ baked into
     the ONNX graph) from one expecting the builder to calibrate it.
     """
-    quantize = getattr(trt.LayerType, 'QUANTIZE', None)
+    quantize = getattr(trt.LayerType, "QUANTIZE", None)
     if quantize is None:
         return False
     return any(network.get_layer(i).type == quantize for i in range(network.num_layers))
@@ -109,7 +109,7 @@ def autocast_onnx_to_fp16(model_proto, op_block_list=None):
 
     return convert_to_f16(
         model_proto,
-        low_precision_type='fp16',
+        low_precision_type="fp16",
         keep_io_types=True,
         op_block_list=list(op_block_list or []),
     )
@@ -133,10 +133,10 @@ def calibration_arrays(calib_dataset, flattener, input_names):
                 f"Calibration item {index} has {len(tensors)} tensors but the model "
                 f"takes {len(input_names)} inputs."
             )
-        for name, tensor in zip(input_names, tensors):
+        for name, tensor in zip(input_names, tensors, strict=False):
             columns[name].append(tensor.detach().cpu().numpy())
     if not any(columns.values()):
-        raise ValueError('Calibration dataset is empty.')
+        raise ValueError("Calibration dataset is empty.")
     return {name: np.concatenate(arrays, axis=0) for name, arrays in columns.items()}
 
 
@@ -163,12 +163,12 @@ def calibration_shapes_spec(calib_dataset, flattener, input_names):
     shapes = {}
     for index in range(len(calib_dataset)):
         tensors = flattener.flatten(calib_dataset[index])
-        for name, tensor in zip(input_names, tensors):
+        for name, tensor in zip(input_names, tensors, strict=False):
             shape = tuple(tensor.shape)
             if shapes.setdefault(str(name), shape) != shape:
                 return None
-    return ','.join(
-        '{}:{}'.format(name, 'x'.join(str(d) for d in shape))
+    return ",".join(
+        "{}:{}".format(name, "x".join(str(d) for d in shape))
         for name, shape in shapes.items()
     )
 
@@ -213,15 +213,17 @@ def quantize_onnx_int8(
 
     quantize(
         onnx_path,
-        quantize_mode='int8',
+        quantize_mode="int8",
         calibration_data=calib_arrays,
-        calibration_eps=list(calibration_eps or ['cpu']),
+        calibration_eps=list(calibration_eps or ["cpu"]),
         calibration_shapes=calibration_shapes,
-        high_precision_dtype='fp16' if fp16 else 'fp32',
+        high_precision_dtype="fp16" if fp16 else "fp32",
         op_types_to_exclude=list(int8_op_block_list) if int8_op_block_list else None,
-        op_types_to_exclude_fp16=list(fp16_op_block_list) if fp16_op_block_list else None,
+        op_types_to_exclude_fp16=list(fp16_op_block_list)
+        if fp16_op_block_list
+        else None,
         use_external_data_format=external_data,
         output_path=output_path,
-        log_level='WARNING',
+        log_level="WARNING",
     )
     return output_path

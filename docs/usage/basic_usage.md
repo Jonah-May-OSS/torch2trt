@@ -45,7 +45,7 @@ print(torch.max(torch.abs(y - y_trt)))
 We can save the model as a ``state_dict``.
 
 ```python
-torch.save(model_trt.state_dict(), 'alexnet_trt.pth')
+torch.save(model_trt.state_dict(), "alexnet_trt.pth")
 ```
 
 We can load the saved model into a ``TRTModule``
@@ -55,5 +55,5 @@ from torch2trt import TRTModule
 
 model_trt = TRTModule()
 
-model_trt.load_state_dict(torch.load('alexnet_trt.pth'))
+model_trt.load_state_dict(torch.load("alexnet_trt.pth"))
 ```

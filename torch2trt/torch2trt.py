@@ -1,18 +1,23 @@
-import torch
-import tensorrt as trt
-import numpy as np
+import importlib
 import os
 from collections import defaultdict
-import importlib
+from typing import ClassVar
 
+import numpy as np
+import tensorrt as trt
+import torch
+
+from .dataset import Dataset, ListDataset
 from .dataset_calibrator import (
-    DatasetCalibrator,
     DEFAULT_CALIBRATION_ALGORITHM,
+    DatasetCalibrator,
 )
-
+from .flatten_module import Flatten
+from .flattener import Flattener
+from .misc_utils import torch_device_to_trt, torch_dtype_to_trt, trt_int_dtype
 from .precision import (
-    WEAK_TYPING_AVAILABLE,
     LEGACY_INT8_CALIBRATION_AVAILABLE,
+    WEAK_TYPING_AVAILABLE,
     autocast_onnx_to_fp16,
     builder_flag,
     calibration_arrays,
@@ -22,22 +27,11 @@ from .precision import (
     network_has_explicit_quantization,
     quantize_onnx_int8,
 )
-
-from .dataset import (
-    Dataset,
-    ListDataset
-)
-
-from .flattener import Flattener
-from .flatten_module import Flatten
+from .trt_module import TRTModule
 from .version_utils import trt_version
-from .trt_module import TRTModule, SharedDeviceMemory
-from .misc_utils import (
-    torch_device_to_trt,
-    torch_dtype_to_trt,
-    trt_int_dtype
-)
+
 # UTILITY FUNCTIONS
+
 
 def trt_num_inputs(engine):
     count = 0
@@ -74,7 +68,7 @@ def torch_dim_to_trt_axes(dim):
     # create axes bitmask for reduce layer
     axes = 0
     for d in dim:
-        axes |= 1 << d 
+        axes |= 1 << d
 
     return axes
 
@@ -116,14 +110,13 @@ def add_missing_trt_tensors(network, tensors):
             # or... add constant for scalar primitive
             if hasattr(t, "_trt") or isinstance(t, IntWrapper):
                 trt_tensor = t._trt
-            elif isinstance(t, float) or isinstance(t, int):
+            elif isinstance(t, (float, int)):
                 shape = (1,)
                 scalar = t * torch.ones(shape, dtype=dtype).cpu().numpy()
                 trt_tensor = network.add_constant(shape, scalar).get_output(0)
 
             # or... add constant for leaf tensor w/o _trt
             else:
-
                 # remove all preceding ones, these can be re-inserted later when broadcasting
                 num_preceding_ones = 0
                 for j in range(len(t.shape)):
@@ -136,7 +129,6 @@ def add_missing_trt_tensors(network, tensors):
                 weight = t.detach().cpu().numpy()
                 t._trt = network.add_constant(shape, weight).get_output(0)
                 trt_tensor = t._trt
-
 
             assert trt_tensor is not None
 
@@ -151,7 +143,6 @@ def broadcast_trt_tensors(network, trt_tensors, broadcast_ndim):
         broadcasted_trt_tensors = [None] * len(trt_tensors)
 
         for i, t in enumerate(trt_tensors):
-
             if len(t.shape) < broadcast_ndim:
                 # append 1 size dims to front
                 diff = broadcast_ndim - len(t.shape)
@@ -178,14 +169,10 @@ def trt_(network, *tensors):
         broadcast_num_dim = 0
         for t in tensors:
             if isinstance(t, torch.Tensor):
-                if not hasattr(t, "_trt"):
-                    num_dim = len(t.shape)  # don't exclude batch for constants
-                else:
-                    num_dim = len(
-                        t._trt.shape
-                    )  # non-leaf tensors must already have _trt, get shape from that
-                if num_dim > broadcast_num_dim:
-                    broadcast_num_dim = num_dim
+                # Constants keep their batch dim; non-leaf tensors already
+                # have _trt, so take the shape from that.
+                num_dim = len(t.shape) if not hasattr(t, "_trt") else len(t._trt.shape)
+                broadcast_num_dim = max(broadcast_num_dim, num_dim)
 
         for i, t in enumerate(tensors):
             trt_tensor = None
@@ -193,7 +180,9 @@ def trt_(network, *tensors):
             # GET TRT TENSOR (OR CREATE TRT CONSTANT)
 
             # get tensor w/ _trt
-            if (isinstance(t, torch.Tensor) and hasattr(t, "_trt")) or isinstance(t, IntWrapper):
+            if (isinstance(t, torch.Tensor) and hasattr(t, "_trt")) or isinstance(
+                t, IntWrapper
+            ):
                 trt_tensor = t._trt
 
             # or... add constant for leaf tensor w/o _trt
@@ -205,7 +194,7 @@ def trt_(network, *tensors):
                 trt_tensor = t._trt
 
             # or... add constant for scalar primitive
-            elif isinstance(t, float) or isinstance(t, int):
+            elif isinstance(t, (float, int)):
                 shape = (1,) * broadcast_num_dim
                 scalar = t * torch.ones(shape, dtype=dtype).cpu().numpy()
                 trt_tensor = network.add_constant(shape, scalar).get_output(0)
@@ -247,7 +236,6 @@ def get_arg(ctx, name, pos, default):
 
 def attach_converter(ctx, method, converter, method_str):
     """Gets a function that executes PyTorch method and TensorRT converter"""
-    global DUMMY_CONVERTERS
 
     def wrapper(*args, **kwargs):
         skip = True
@@ -284,7 +272,7 @@ def attach_converter(ctx, method, converter, method_str):
     return wrapper
 
 
-class ConversionHook(object):
+class ConversionHook:
     """Attaches TensorRT converter to PyTorch method call"""
 
     def __init__(self, ctx, key, converter):
@@ -293,34 +281,38 @@ class ConversionHook(object):
         self.converter = converter
 
     def _set_method(self, method):
-        module = self.converter['module']
-        exec('module.%s = method' % self.converter['qual_name'])
+        exec("module.{} = method".format(self.converter["qual_name"]))
 
     def __enter__(self):
         self._set_method(
             attach_converter(
-                self.ctx, self.converter['method_impl'], self.converter, self.converter['method_str']
+                self.ctx,
+                self.converter["method_impl"],
+                self.converter,
+                self.converter["method_str"],
             )
         )
 
     def __exit__(self, type, val, tb):
-        self._set_method(self.converter['method_impl'])
+        self._set_method(self.converter["method_impl"])
+
 
 def default_input_names(num_inputs):
-    return ["input_%d" % i for i in range(num_inputs)]
+    return [f"input_{i}" for i in range(num_inputs)]
+
 
 def default_output_names(num_outputs):
-    return ["output_%d" % i for i in range(num_outputs)]
+    return [f"output_{i}" for i in range(num_outputs)]
 
 
 def device_type_str(device_type):
     if device_type == trt.DeviceType.GPU:
-        return 'GPU'
+        return "GPU"
     elif device_type == trt.DeviceType.DLA:
-        return 'DLA'
-    
+        return "DLA"
 
-class NetworkWrapper(object):
+
+class NetworkWrapper:
     def __init__(self, ctx, network):
         self._ctx = ctx
         self._network = network
@@ -328,35 +320,44 @@ class NetworkWrapper(object):
 
     def _configure_layer(self, layer):
         with use_shape_wrapping(False):
-        
             # set layer device type
             device_type = self._ctx.current_device_type()
             self._ctx.builder_config.set_device_type(layer, device_type)
             orig_device_type = device_type
-            if device_type == trt.DeviceType.DLA and not self._ctx.builder_config.can_run_on_DLA(layer):
-                if self._ctx.torch2trt_kwargs['gpu_fallback']:
-                    device_type = trt.DeviceType.GPU  # layer will fall back to GPU
-            
+            if (
+                device_type == trt.DeviceType.DLA
+                and not self._ctx.builder_config.can_run_on_DLA(layer)
+            ) and self._ctx.torch2trt_kwargs["gpu_fallback"]:
+                device_type = trt.DeviceType.GPU  # layer will fall back to GPU
+
             # set layer name
             def arg_str(arg):
                 if isinstance(arg, torch.Tensor):
-                    return "tensor(shape=%s, dtype=%s)" % (str(list(arg.shape)), str(arg.dtype))
+                    return f"tensor(shape={list(arg.shape)!s}, dtype={arg.dtype!s})"
                 return str(arg)
-            scope_name = self._ctx.current_module_name()# + ':' + layer.type.name
+
+            scope_name = self._ctx.current_module_name()  # + ':' + layer.type.name
             self._layer_counts[scope_name] += 1
-            args = [arg_str(arg) for arg in self._ctx.method_args]
-            kwargs = ["%s=%s" % (key, arg_str(arg)) for key, arg in self._ctx.method_kwargs.items()]
-            layer.name = scope_name + ':' + str(self._layer_counts[scope_name] - 1) + ':' + layer.type.name + ':' + device_type_str(device_type) 
-            
+            layer.name = (
+                scope_name
+                + ":"
+                + str(self._layer_counts[scope_name] - 1)
+                + ":"
+                + layer.type.name
+                + ":"
+                + device_type_str(device_type)
+            )
+
             if orig_device_type != device_type:
-                layer.name = layer.name + '(' + device_type_str(orig_device_type) + ')'
+                layer.name = layer.name + "(" + device_type_str(orig_device_type) + ")"
+
     #         "%s [%s #%d, %s] %s(%s)" % (self._ctx.current_module_name(), layer.type.name, self._layer_counts[layer.type.name], device_type_str(device_type),
     #                                           self._ctx.method_str, ", ".join(args + kwargs))
-    
-        
+
     def __getattr__(self, name):
         attr = getattr(self._network, name)
         if callable(attr):
+
             def wrapper(*args, **kwargs):
                 ret = attr(*args, **kwargs)
                 if isinstance(ret, trt.ILayer):
@@ -375,9 +376,15 @@ def get_conversion_context():
     return _ACTIVE_CONVERSION_CONTEXT
 
 
-class ConversionContext(object):
-    
-    def __init__(self, network, converters=CONVERTERS, torch2trt_kwargs=None, builder_config=None, logger=None):
+class ConversionContext:
+    def __init__(
+        self,
+        network,
+        converters=CONVERTERS,
+        torch2trt_kwargs=None,
+        builder_config=None,
+        logger=None,
+    ):
         self.network = NetworkWrapper(self, network)
         self.lock = False
         self.method_args = None
@@ -389,69 +396,69 @@ class ConversionContext(object):
             ConversionHook(self, key, converter)
             for key, converter in converters.items()
         ]
-        
+
         self.module_stack = []
         self.module_handles = []
         self.device_type_stack = []
         self.module_name_map = {}
-        for name, module in torch2trt_kwargs['module'].named_modules():
+        for name, module in torch2trt_kwargs["module"].named_modules():
             self.module_name_map[module] = name
         self.logger = logger
 
     def current_module_name(self):
         return self.get_module_name(self.current_module())
-    
+
     def current_module(self):
         return self.module_stack[-1]
-    
+
     def get_module_name(self, module):
         return self.module_name_map[module]
-    
+
     def _module_pre_hook(self, module, input):
         # TODO(@jwelsh): add logging to show module entry / exit
         self.module_stack.append(module)
-        
+
         # hook that is attached to modulee using register_forward_pre_hook, which is called before module is executed
-        if module in self.torch2trt_kwargs['device_types']:
-            device_type = self.torch2trt_kwargs['device_types'][module]
+        if module in self.torch2trt_kwargs["device_types"]:
+            device_type = self.torch2trt_kwargs["device_types"][module]
             self.device_type_stack.append((module, device_type))
-        
+
     def _module_post_hook(self, module, input, output):
-        
+
         # if module was used to set the current device type, pop device type from stack
         if self.current_device_type_module() == module:
             self.device_type_stack.pop()
-            
+
         self.module_stack.pop()
-        
+
     def current_device_type(self):
         """Returns the current device type"""
         if len(self.device_type_stack) > 0:
             return self.device_type_stack[-1][1]
         else:
-            return self.torch2trt_kwargs['default_device_type']
-        
+            return self.torch2trt_kwargs["default_device_type"]
+
     def current_device_type_module(self):
         """Returns the module which controls the current device type"""
         if len(self.device_type_stack) > 0:
             return self.device_type_stack[-1][0]
         else:
             return None
-        
+
     def __enter__(self):
         global _ACTIVE_CONVERSION_CONTEXT
-        
+
         # attach hooks which add converters to methods
         for hook in self.hooks:
             hook.__enter__()
-        
+
         # attach hooks which control the current device type
-        for name, module in self.torch2trt_kwargs['module'].named_modules():
+        for _name, module in self.torch2trt_kwargs["module"].named_modules():
             pre_hook_handle = module.register_forward_pre_hook(self._module_pre_hook)
             post_hook_handle = module.register_forward_hook(self._module_post_hook)
             self.module_handles.append(pre_hook_handle)
             self.module_handles.append(post_hook_handle)
-            
+
         _ACTIVE_CONVERSION_CONTEXT = self
 
         torch.Tensor.size = _size_wrapper
@@ -461,7 +468,6 @@ class ConversionContext(object):
 
     def __exit__(self, type, val, tb):
         global _ACTIVE_CONVERSION_CONTEXT
-        
 
         for hook in self.hooks:
             hook.__exit__(type, val, tb)
@@ -473,7 +479,6 @@ class ConversionContext(object):
         torch.Tensor.size = _original_size
         torch.Tensor.__getattribute__ = _old_getattr
 
-
     def add_inputs(self, torch_inputs, names=None, dynamic_axes=None):
 
         if names is None:
@@ -481,11 +486,9 @@ class ConversionContext(object):
         self.input_names = names
 
         for i, torch_input in enumerate(torch_inputs):
-
             if not hasattr(torch_input, "_trt"):
-                
                 shape = list(torch_input.shape)
-                
+
                 if dynamic_axes is not None:
                     for dim in dynamic_axes[i]:
                         shape[dim] = -1
@@ -513,16 +516,16 @@ class ConversionContext(object):
             self.network.mark_output(trt_tensor)
 
 
-
-
-
 def infer_dynamic_axes(min_shapes_flat, max_shapes_flat):
     dynamic_axes = [[] for i in range(len(min_shapes_flat))]
-    for i, (mins, maxs) in enumerate(zip(min_shapes_flat, max_shapes_flat)):
-        for j, (mins_i, maxs_i) in enumerate(zip(mins, maxs)):
+    for i, (mins, maxs) in enumerate(
+        zip(min_shapes_flat, max_shapes_flat, strict=False)
+    ):
+        for j, (mins_i, maxs_i) in enumerate(zip(mins, maxs, strict=False)):
             if mins_i != maxs_i:
                 dynamic_axes[i].append(j)
     return dynamic_axes
+
 
 # protobuf refuses to serialize any message larger than 2 GiB, so a plain
 # onnx.save() of a big graph dies with "EncodeError: Failed to serialize proto".
@@ -530,11 +533,11 @@ def infer_dynamic_axes(min_shapes_flat, max_shapes_flat):
 # Writing the weights out as external data keeps the proto itself small; the
 # sidecar is resolved relative to the model file, which TensorRT's
 # parse_from_file() handles.
-_PROTO_SIZE_LIMIT = 2 * 1024 ** 3
+_PROTO_SIZE_LIMIT = 2 * 1024**3
 
 # Headroom for the graph structure (nodes, names, value_info) that the
 # initializer-only estimate below does not account for.
-_PROTO_SIZE_MARGIN = 128 * 1024 ** 2
+_PROTO_SIZE_MARGIN = 128 * 1024**2
 
 
 def _tensor_nbytes(tensor):
@@ -598,37 +601,41 @@ def save_onnx(onnx, model_proto, path):
     return True
 
 
-def torch2trt(module,
-              inputs,
-              input_names=None,
-              output_names=None,
-              log_level=trt.Logger.ERROR,
-              fp16_mode=False,
-              max_workspace_size=1<<25,
-              strict_type_constraints=False,
-              keep_network=True,
-              int8_mode=False,
-              int8_calib_dataset=None,
-              int8_calib_algorithm=DEFAULT_CALIBRATION_ALGORITHM,
-              use_onnx=False,
-              default_device_type=trt.DeviceType.GPU,
-              dla_core=0,
-              gpu_fallback=True,
-              device_types={},
-              min_shapes=None,
-              max_shapes=None,
-              opt_shapes=None,
-              onnx_opset=None,
-              max_batch_size=None,
-              avg_timing_iterations=None,
-              fp16_op_block_list=None,
-              int8_op_block_list=None,
-              int8_calibration_eps=None,
-              **kwargs):
+def torch2trt(
+    module,
+    inputs,
+    input_names=None,
+    output_names=None,
+    log_level=trt.Logger.ERROR,
+    fp16_mode=False,
+    max_workspace_size=1 << 25,
+    strict_type_constraints=False,
+    keep_network=True,
+    int8_mode=False,
+    int8_calib_dataset=None,
+    int8_calib_algorithm=DEFAULT_CALIBRATION_ALGORITHM,
+    use_onnx=False,
+    default_device_type=trt.DeviceType.GPU,
+    dla_core=0,
+    gpu_fallback=True,
+    device_types=None,
+    min_shapes=None,
+    max_shapes=None,
+    opt_shapes=None,
+    onnx_opset=None,
+    max_batch_size=None,
+    avg_timing_iterations=None,
+    fp16_op_block_list=None,
+    int8_op_block_list=None,
+    int8_calibration_eps=None,
+    **kwargs,
+):
 
     # capture arguments to provide to context
+    if device_types is None:
+        device_types = {}
     kwargs.update(locals())
-    kwargs.pop('kwargs')
+    kwargs.pop("kwargs")
 
     # On strongly typed TensorRT (11.x+) precision lives in the graph, not in
     # builder flags, and only the ONNX path can carry it: FP16 needs AutoCast to
@@ -645,7 +652,9 @@ def torch2trt(module,
     if issubclass(inputs.__class__, Dataset):
         dataset = inputs
         if len(dataset) == 0:
-            raise ValueError('Dataset must have at least one element to use for inference.')
+            raise ValueError(
+                "Dataset must have at least one element to use for inference."
+            )
         inputs = dataset[0]
     else:
         dataset = ListDataset()
@@ -667,7 +676,7 @@ def torch2trt(module,
         max_shapes_flat = [tuple(t) for t in dataset.max_shapes(flat=True)]
     else:
         max_shapes_flat = input_flattener.flatten(max_shapes)
-    
+
     if opt_shapes is None:
         opt_shapes_flat = [tuple(t) for t in dataset.median_numel_shapes(flat=True)]
     else:
@@ -675,15 +684,15 @@ def torch2trt(module,
 
     # handle legacy max_batch_size
     if max_batch_size is not None:
-        min_shapes_flat = [(1,) + s[1:] for s in min_shapes_flat]
-        max_shapes_flat = [(max_batch_size,) + s[1:] for s in max_shapes_flat]
+        min_shapes_flat = [(1, *s[1:]) for s in min_shapes_flat]
+        max_shapes_flat = [(max_batch_size, *s[1:]) for s in max_shapes_flat]
 
     dynamic_axes_flat = infer_dynamic_axes(min_shapes_flat, max_shapes_flat)
-    
+
     if default_device_type == trt.DeviceType.DLA:
         for value in dynamic_axes_flat:
             if len(value) > 0:
-                raise ValueError('Dataset cannot have multiple shapes when using DLA')
+                raise ValueError("Dataset cannot have multiple shapes when using DLA")
 
     logger = trt.Logger(log_level)
     builder = trt.Builder(logger)
@@ -695,9 +704,10 @@ def torch2trt(module,
         output_names = default_output_names(output_flattener.size)
 
     if use_onnx:
-        import onnx_graphsurgeon as gs
-        import onnx
         import tempfile
+
+        import onnx
+        import onnx_graphsurgeon as gs
 
         module_flat = Flatten(module, input_flattener, output_flattener)
         inputs_flat = input_flattener.flatten(inputs)
@@ -705,22 +715,27 @@ def torch2trt(module,
         # Export, optimize, and parse ONNX via a temp directory (auto-cleaned)
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_in_path = os.path.join(tmpdir, "model_in.onnx")
-            
+
             # Check PyTorch version to use legacy ONNX exporter for 2.9+
-            torch_version = tuple(int(x) for x in torch.__version__.split('+')[0].split('.')[:2])
-            
-            export_args = dict(
-                model=module_flat,
-                args=inputs_flat,
-                f=tmp_in_path,
-                input_names=input_names,
-                output_names=output_names,
-                dynamic_axes={
-                    name: {int(axis): f"input_{index}_axis_{axis}" for axis in dynamic_axes_flat[index]}
+            torch_version = tuple(
+                int(x) for x in torch.__version__.split("+")[0].split(".")[:2]
+            )
+
+            export_args = {
+                "model": module_flat,
+                "args": inputs_flat,
+                "f": tmp_in_path,
+                "input_names": input_names,
+                "output_names": output_names,
+                "dynamic_axes": {
+                    name: {
+                        int(axis): f"input_{index}_axis_{axis}"
+                        for axis in dynamic_axes_flat[index]
+                    }
                     for index, name in enumerate(input_names)
                 },
-            )
-            
+            }
+
             # Force legacy ONNX exporter for PyTorch 2.9+ to avoid torch.export issues
             if torch_version >= (2, 9):
                 export_args["dynamo"] = False
@@ -826,8 +841,9 @@ def torch2trt(module,
 
     else:
         network = builder.create_network(network_creation_flags())
-        with ConversionContext(network, torch2trt_kwargs=kwargs, builder_config=config, logger=logger) as ctx:
-            
+        with ConversionContext(
+            network, torch2trt_kwargs=kwargs, builder_config=config, logger=logger
+        ) as ctx:
             inputs_flat = input_flattener.flatten(inputs)
 
             ctx.add_inputs(inputs_flat, input_names, dynamic_axes=dynamic_axes_flat)
@@ -846,7 +862,6 @@ def torch2trt(module,
         # build is unbounded and defaults to the entire device, which OOMs the
         # GPU (and drags host RAM up with it) on larger models.
         config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, max_workspace_size)
-    
 
     # set number of avg timing itrs.
     if avg_timing_iterations is not None:
@@ -858,21 +873,21 @@ def torch2trt(module,
         config.set_flag(trt.BuilderFlag.FP16)
 
     config.default_device_type = default_device_type
-    gpu_fallback_flag = builder_flag('GPU_FALLBACK')
+    gpu_fallback_flag = builder_flag("GPU_FALLBACK")
     if gpu_fallback and gpu_fallback_flag is not None:
         config.set_flag(gpu_fallback_flag)
     config.DLA_core = dla_core
 
     # STRICT_TYPES is gone from 11.x, where a strongly typed network already
     # obeys the graph's types exactly — the request is satisfied by definition.
-    strict_types_flag = builder_flag('STRICT_TYPES')
+    strict_types_flag = builder_flag("STRICT_TYPES")
     if strict_type_constraints and strict_types_flag is not None:
         config.set_flag(strict_types_flag)
 
     calibrator = None
 
     if int8_mode:
-        int8_flag = builder_flag('INT8')
+        int8_flag = builder_flag("INT8")
         if int8_flag is not None:
             config.set_flag(int8_flag)
 
@@ -891,7 +906,7 @@ def torch2trt(module,
                     "use_onnx=True and an int8_calib_dataset so the ONNX quantizer can "
                     "insert them, or hand in an already-quantized module."
                 )
-        elif not kwargs.get('qat_mode', False) and not explicit_quantization:
+        elif not kwargs.get("qat_mode", False) and not explicit_quantization:
             # default to use input tensors for calibration
             if int8_calib_dataset is None:
                 int8_calib_dataset = dataset
@@ -905,10 +920,7 @@ def torch2trt(module,
     profile = builder.create_optimization_profile()
     for index, name in enumerate(input_names):
         profile.set_shape(
-            name,
-            min_shapes_flat[index],
-            opt_shapes_flat[index],
-            max_shapes_flat[index]
+            name, min_shapes_flat[index], opt_shapes_flat[index], max_shapes_flat[index]
         )
     config.add_optimization_profile(profile)
 
@@ -937,7 +949,13 @@ def torch2trt(module,
             "max_workspace_size and retry."
         )
 
-    module_trt = TRTModule(engine, input_names, output_names, input_flattener=input_flattener, output_flattener=output_flattener)
+    module_trt = TRTModule(
+        engine,
+        input_names,
+        output_names,
+        input_flattener=input_flattener,
+        output_flattener=output_flattener,
+    )
 
     if keep_network:
         module_trt.network = network
@@ -947,8 +965,9 @@ def torch2trt(module,
 
 # DEFINE ALL CONVERSION FUNCTIONS
 
+
 def get_module_qualname(name):
-    s = name.split('.')
+    s = name.split(".")
 
     for i in range(len(s)):
         idx = len(s) - i - 1
@@ -961,21 +980,27 @@ def get_module_qualname(name):
             continue
         except ImportError as e:
             # Surface unexpected import issues
-            raise RuntimeError("Failed to parse ONNX model. " + e.msg)
+            raise RuntimeError("Failed to parse ONNX model. " + e.msg) from e
 
     raise RuntimeError("Could not import module")
 
 
-def tensorrt_converter(method, is_real=True, enabled=True, imports=[]):
+def tensorrt_converter(method, is_real=True, enabled=True, imports=None):
 
+    if imports is None:
+        imports = []
     if isinstance(method, str):
         module, module_name, qual_name = get_module_qualname(method)
     else:
-        module, module_name, qual_name = importlib.import_module(method.__module__), method.__module__, method.__qualname__
+        module, module_name, qual_name = (
+            importlib.import_module(method.__module__),
+            method.__module__,
+            method.__qualname__,
+        )
 
     try:
         # No deepcopy needed; store original callable
-        method_impl = eval('module.%s' % qual_name)
+        method_impl = eval(f"module.{qual_name}")
     except AttributeError:
         enabled = False
 
@@ -986,8 +1011,8 @@ def tensorrt_converter(method, is_real=True, enabled=True, imports=[]):
             "module": module,
             "module_name": module_name,
             "qual_name": qual_name,
-            "method_str": module_name + '.' + qual_name,
-            "method_impl": method_impl
+            "method_str": module_name + "." + qual_name,
+            "method_impl": method_impl,
         }
         return converter
 
@@ -1031,13 +1056,15 @@ _int_add = int.__add__
 _int_sub = int.__sub__
 _int_floordiv = int.__floordiv__
 
+
 class IntWrapper(int):
-    
     @property
     def _trt(self):
-        if not hasattr(self, '_raw_trt'):
+        if not hasattr(self, "_raw_trt"):
             ctx = get_conversion_context()
-            self._raw_trt = ctx.network._network.add_constant([1], np.array([_int(self)], dtype=trt_int_dtype())).get_output(0)
+            self._raw_trt = ctx.network._network.add_constant(
+                [1], np.array([_int(self)], dtype=trt_int_dtype())
+            ).get_output(0)
         return self._raw_trt
 
     # lhs ops
@@ -1046,7 +1073,9 @@ class IntWrapper(int):
             x = IntWrapper(x)
         ctx = get_conversion_context()
         result = IntWrapper(_int_mul(self, x))
-        result._raw_trt = ctx.network._network.add_elementwise(self._trt, x._trt, trt.ElementWiseOperation.PROD).get_output(0)
+        result._raw_trt = ctx.network._network.add_elementwise(
+            self._trt, x._trt, trt.ElementWiseOperation.PROD
+        ).get_output(0)
         return result
 
     def __add__(self, x):
@@ -1054,7 +1083,9 @@ class IntWrapper(int):
             x = IntWrapper(x)
         ctx = get_conversion_context()
         result = IntWrapper(_int_add(self, x))
-        result._raw_trt = ctx.network._network.add_elementwise(self._trt, x._trt, trt.ElementWiseOperation.SUM).get_output(0)
+        result._raw_trt = ctx.network._network.add_elementwise(
+            self._trt, x._trt, trt.ElementWiseOperation.SUM
+        ).get_output(0)
         return result
 
     def __sub__(self, x):
@@ -1062,7 +1093,9 @@ class IntWrapper(int):
             x = IntWrapper(x)
         ctx = get_conversion_context()
         result = IntWrapper(_int_sub(self, x))
-        result._raw_trt = ctx.network._network.add_elementwise(self._trt, x._trt, trt.ElementWiseOperation.SUB).get_output(0)
+        result._raw_trt = ctx.network._network.add_elementwise(
+            self._trt, x._trt, trt.ElementWiseOperation.SUB
+        ).get_output(0)
         return result
 
     def __floordiv__(self, x):
@@ -1070,7 +1103,9 @@ class IntWrapper(int):
             x = IntWrapper(x)
         ctx = get_conversion_context()
         result = IntWrapper(_int_floordiv(self, x))
-        result._raw_trt = ctx.network._network.add_elementwise(self._trt, x._trt, trt.ElementWiseOperation.FLOOR_DIV).get_output(0)
+        result._raw_trt = ctx.network._network.add_elementwise(
+            self._trt, x._trt, trt.ElementWiseOperation.FLOOR_DIV
+        ).get_output(0)
         return result
 
     # rhs ops
@@ -1079,7 +1114,9 @@ class IntWrapper(int):
             x = IntWrapper(x)
         ctx = get_conversion_context()
         result = IntWrapper(_int_mul(x, self))
-        result._raw_trt = ctx.network._network.add_elementwise(x._trt, self._trt, trt.ElementWiseOperation.PROD).get_output(0)
+        result._raw_trt = ctx.network._network.add_elementwise(
+            x._trt, self._trt, trt.ElementWiseOperation.PROD
+        ).get_output(0)
         return result
 
     def __radd__(self, x):
@@ -1087,7 +1124,9 @@ class IntWrapper(int):
             x = IntWrapper(x)
         ctx = get_conversion_context()
         result = IntWrapper(_int_add(x, self))
-        result._raw_trt = ctx.network._network.add_elementwise(x._trt, self._trt, trt.ElementWiseOperation.SUM).get_output(0)
+        result._raw_trt = ctx.network._network.add_elementwise(
+            x._trt, self._trt, trt.ElementWiseOperation.SUM
+        ).get_output(0)
         return result
 
     def __rsub__(self, x):
@@ -1095,7 +1134,9 @@ class IntWrapper(int):
             x = IntWrapper(x)
         ctx = get_conversion_context()
         result = IntWrapper(_int_sub(x, self))
-        result._raw_trt = ctx.network._network.add_elementwise(x._trt, self._trt, trt.ElementWiseOperation.SUB).get_output(0)
+        result._raw_trt = ctx.network._network.add_elementwise(
+            x._trt, self._trt, trt.ElementWiseOperation.SUB
+        ).get_output(0)
         return result
 
     def __rfloordiv__(self, x):
@@ -1103,11 +1144,14 @@ class IntWrapper(int):
             x = IntWrapper(x)
         ctx = get_conversion_context()
         result = IntWrapper(_int_floordiv(x, self))
-        result._raw_trt = ctx.network._network.add_elementwise(x._trt, self._trt, trt.ElementWiseOperation.FLOOR_DIV).get_output(0)
+        result._raw_trt = ctx.network._network.add_elementwise(
+            x._trt, self._trt, trt.ElementWiseOperation.FLOOR_DIV
+        ).get_output(0)
         return result
 
     def __int__(self):
         return self
+
 
 def make_int_wrapper(x):
     if isinstance(x, IntWrapper):
@@ -1115,13 +1159,15 @@ def make_int_wrapper(x):
     else:
         return IntWrapper(x)
 
-class SizeWrapper(tuple):
 
+class SizeWrapper(tuple):
     @property
     def _trt(self):
-        if not hasattr(self, '_raw_trt'):
+        if not hasattr(self, "_raw_trt"):
             ctx = get_conversion_context()
-            self._raw_trt = ctx.network._network.add_concatenation([d._trt for d in self]).get_output(0)
+            self._raw_trt = ctx.network._network.add_concatenation(
+                [d._trt for d in self]
+            ).get_output(0)
         return self._raw_trt
 
     def __tuple__(self):
@@ -1143,7 +1189,7 @@ _original_getattr = torch.Tensor.__getattribute__
 
 def _size_wrapper(input, dim=None):
 
-    if not hasattr(input, '_trt'):
+    if not hasattr(input, "_trt"):
         if dim is not None:
             return _original_size(input, dim)
         else:
@@ -1158,7 +1204,9 @@ def _size_wrapper(input, dim=None):
     shape_trt = ctx.network._network.add_shape(input._trt).get_output(0)
 
     for i, d in enumerate(output):
-        d._raw_trt = ctx.network._network.add_slice(shape_trt, [i], [1], [1]).get_output(0)
+        d._raw_trt = ctx.network._network.add_slice(
+            shape_trt, [i], [1], [1]
+        ).get_output(0)
 
     if dim is not None:
         output = output[dim]
@@ -1168,19 +1216,20 @@ def _size_wrapper(input, dim=None):
 
 _old_getattr = torch.Tensor.__getattribute__
 
+
 def _new_getattr(self, name):
-    if name == 'shape' and use_shape_wrapping.stack[0]:
+    if name == "shape" and use_shape_wrapping.stack[0]:
         return _size_wrapper(self)
     else:
         return _old_getattr(self, name)
 
-class use_shape_wrapping:
 
-    stack = [True] # default true
+class use_shape_wrapping:
+    stack: ClassVar[list[bool]] = [True]  # default true
 
     def __init__(self, value: bool):
         self._value = value
-    
+
     def __enter__(self, *args, **kwargs):
         self.stack.insert(0, self._value)
 

@@ -1,12 +1,10 @@
-import pytest
 import torch
-import torch.nn as nn
+from torch import nn
+
 from torch2trt import torch2trt, trt
 
 
 class YOLOXFocusTestModule(nn.Module):
-
-
     def forward(self, x):
         patch_top_left = x[..., ::2, ::2]
         patch_top_right = x[..., ::2, 1::2]
@@ -27,8 +25,6 @@ class YOLOXFocusTestModule(nn.Module):
 def test_getitem_dynamic_yolox_layer():
 
     class YOLOXFocusTestModule(nn.Module):
-
-
         def forward(self, x):
             patch_top_left = x[..., ::2, ::2]
             patch_top_right = x[..., ::2, 1::2]
@@ -49,20 +45,20 @@ def test_getitem_dynamic_yolox_layer():
 
     data = torch.randn(1, 3, 112, 112).cuda()
 
-    module_trt = torch2trt(module, [data], max_batch_size=4, log_level=trt.Logger.VERBOSE)
+    module_trt = torch2trt(
+        module, [data], max_batch_size=4, log_level=trt.Logger.VERBOSE
+    )
 
     data = torch.randn(1, 3, 112, 112).cuda()
-    assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
-    
+    assert torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4)
+
     data = torch.randn(4, 3, 112, 112).cuda()
-    assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
+    assert torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4)
 
 
 def test_getitem_dynamic_add_dim():
 
     class TestModule(nn.Module):
-
-
         def forward(self, x):
             patch_top_left = x[..., None]
             patch_top_right = x[..., None]
@@ -83,20 +79,20 @@ def test_getitem_dynamic_add_dim():
 
     data = torch.randn(1, 3, 112, 112).cuda()
 
-    module_trt = torch2trt(module, [data], max_batch_size=4, log_level=trt.Logger.VERBOSE)
+    module_trt = torch2trt(
+        module, [data], max_batch_size=4, log_level=trt.Logger.VERBOSE
+    )
 
     data = torch.randn(1, 3, 112, 112).cuda()
-    assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
-    
+    assert torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4)
+
     data = torch.randn(4, 3, 112, 112).cuda()
-    assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
+    assert torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4)
 
 
 def test_getitem_dynamic_remove_dim():
 
     class TestModule(nn.Module):
-
-
         def forward(self, x):
             patch_top_left = x[..., 0]
             patch_top_right = x[..., 0]
@@ -117,20 +113,20 @@ def test_getitem_dynamic_remove_dim():
 
     data = torch.randn(1, 3, 112, 112).cuda()
 
-    module_trt = torch2trt(module, [data], max_batch_size=4, log_level=trt.Logger.VERBOSE)
+    module_trt = torch2trt(
+        module, [data], max_batch_size=4, log_level=trt.Logger.VERBOSE
+    )
 
     data = torch.randn(1, 3, 112, 112).cuda()
-    assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
-    
+    assert torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4)
+
     data = torch.randn(4, 3, 112, 112).cuda()
-    assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
+    assert torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4)
 
 
 def test_getitem_dynamic_remove_add_dim():
 
     class TestModule(nn.Module):
-
-
         def forward(self, x):
             patch_top_left = x[..., 0, None]
             patch_top_right = x[..., 0, None]
@@ -151,11 +147,12 @@ def test_getitem_dynamic_remove_add_dim():
 
     data = torch.randn(1, 3, 112, 112).cuda()
 
-    module_trt = torch2trt(module, [data], max_batch_size=4, log_level=trt.Logger.VERBOSE)
+    module_trt = torch2trt(
+        module, [data], max_batch_size=4, log_level=trt.Logger.VERBOSE
+    )
 
     data = torch.randn(1, 3, 112, 112).cuda()
-    assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
-    
-    data = torch.randn(4, 3, 112, 112).cuda()
-    assert(torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4))
+    assert torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4)
 
+    data = torch.randn(4, 3, 112, 112).cuda()
+    assert torch.allclose(module_trt(data), module(data), atol=1e-4, rtol=1e-4)

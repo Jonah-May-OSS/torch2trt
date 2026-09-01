@@ -72,21 +72,22 @@ from torchvision.datasets import ImageFolder
 from torchvision.transforms import ToTensor, Compose, Normalize, Resize
 
 
-class ImageFolderCalibDataset():
-    
+class ImageFolderCalibDataset:
     def __init__(self, root):
         self.dataset = ImageFolder(
-            root=root, 
-            transform=Compose([
-                Resize((224, 224)),
-                ToTensor(),
-                Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-            ])
+            root=root,
+            transform=Compose(
+                [
+                    Resize((224, 224)),
+                    ToTensor(),
+                    Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+                ]
+            ),
         )
-        
+
     def __len__(self):
         return len(self.dataset)
-    
+
     def __getitem__(self, idx):
         image, _ = self.dataset[idx]
         image = image[None, ...]  # add batch dimension
@@ -96,7 +97,7 @@ class ImageFolderCalibDataset():
 You would then provide this calibration dataset to torch2trt as follows
 
 ```python
-dataset = ImageFolderCalibDataset('images')
+dataset = ImageFolderCalibDataset("images")
 
 model_trt = torch2trt(model, [data], int8_calib_dataset=dataset)
 ```
@@ -110,7 +111,12 @@ that you wish to use.  For example, to use the minmax calibration algorithm you 
 ```python
 import tensorrt as trt
 
-model_trt = torch2trt(model, [data], int8_mode=True, int8_calib_algorithm=trt.CalibrationAlgoType.MINMAX_CALIBRATION)
+model_trt = torch2trt(
+    model,
+    [data],
+    int8_mode=True,
+    int8_calib_algorithm=trt.CalibrationAlgoType.MINMAX_CALIBRATION,
+)
 ```
 
 ### Calibration Batch Size

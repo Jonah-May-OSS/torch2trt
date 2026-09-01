@@ -1,0 +1,46 @@
+# Mirrors wyoming-whisper-trt's ruff policy so both repos lint alike.
+# Standalone rather than pyproject.toml: this project builds via setup.py and a
+# CUDAExtension, and introducing a pyproject.toml would switch pip to PEP 517.
+line-length = 88
+target-version = "py312"
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+]
+
+[lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "SIM",    # flake8-simplify
+    "Q",      # flake8-quotes
+    "RUF",    # ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long (handled by the formatter)
+    # torch2trt is built on star imports: `from .converters import *` is how
+    # the converter registry is populated, and every converter module re-exports
+    # through one. These two rules account for 683 of 699 findings here, and
+    # clearing them would mean rewriting the library's import architecture --
+    # which is upstream NVIDIA design, not a defect. Everything else is fixed.
+    "F403",   # star import used
+    "F405",   # name may be undefined, or defined from a star import
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["D", "ARG"]
+"examples/*" = ["D", "ARG"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

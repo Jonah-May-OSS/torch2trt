@@ -1,9 +1,8 @@
-import pytest
-
 import torch2trt.version_utils
 
+
 def test_version_utils():
-    
+
     a = torch2trt.version_utils.Version("10.1")
 
     assert a >= "10.1"
