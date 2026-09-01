@@ -1,7 +1,15 @@
+import pytest
 import torch
 from torch import nn
 
 from torch2trt import torch2trt, trt
+
+# TensorRT conversion needs a device to build and run engines on, so every
+# test in this module requires one. Without the skip these fail rather than
+# skip, which makes a CPU-only run indistinguishable from a broken one.
+pytestmark = pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="requires a CUDA GPU"
+)
 
 
 class YOLOXFocusTestModule(nn.Module):

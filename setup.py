@@ -24,17 +24,32 @@ if version.parse(torch.__version__) < version.parse("1.5"):
 if version.parse(tensorrt.__version__) < version.parse("8"):
     compile_args_cxx.append("-DPRE_TRT8")
 
-plugins_ext_module = CUDAExtension(
-    name="plugins",
-    sources=["torch2trt/plugins/plugins.cpp"],
-    include_dirs=[trt_inc_dir()],
-    library_dirs=[trt_lib_dir()],
-    libraries=["nvinfer"],
-    extra_compile_args={"cxx": compile_args_cxx, "nvcc": []},
-)
+
+def make_plugins_ext_module():
+    """Describe the nvcc-built plugins extension.
+
+    Deliberately a function rather than a module-level value. CUDAExtension()
+    calls torch's library_paths(), which raises
+
+        OSError: CUDA_HOME environment variable is not set.
+
+    on any machine without a CUDA toolkit. Building it eagerly made a plain
+    `setup.py install` fail there, so installing the pure-Python package
+    required an nvcc it never invoked -- and the extension is only ever used
+    under --plugins.
+    """
+    return CUDAExtension(
+        name="plugins",
+        sources=["torch2trt/plugins/plugins.cpp"],
+        include_dirs=[trt_inc_dir()],
+        library_dirs=[trt_lib_dir()],
+        libraries=["nvinfer"],
+        extra_compile_args={"cxx": compile_args_cxx, "nvcc": []},
+    )
+
 
 if "--plugins" in sys.argv:
-    ext_modules.append(plugins_ext_module)
+    ext_modules.append(make_plugins_ext_module())
     sys.argv.remove("--plugins")
 
 if "--contrib" in sys.argv:

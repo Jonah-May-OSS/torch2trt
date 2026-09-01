@@ -1,13 +1,17 @@
-# Type-check the library itself; examples, tests, scripts and the generated
+# Type-check the library and its tests; examples, scripts and the generated
 # build tree are not part of the shipped package.
 [src]
-include = ["torch2trt"]
+include = ["torch2trt", "tests"]
 exclude = [
     "build",
     "examples",
     "scripts",
-    "tests",
     "**/__pycache__",
+    # contrib is not part of the default install (setup.py excludes it unless
+    # --contrib is passed) and its QAT layers import pytorch_quantization and
+    # absl, neither a dependency of this package nor installed in the checked
+    # environment. Checking it would report on code that does not ship.
+    "torch2trt/contrib",
     # Optional visualisation helper; graphviz is not a runtime dependency and
     # is not installed in the checked environment.
     "torch2trt/utils.py",

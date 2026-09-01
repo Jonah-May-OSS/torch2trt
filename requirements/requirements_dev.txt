@@ -1,0 +1,23 @@
+# Dependencies for linting, type-checking and running the test suite in CI.
+#
+# The versions mirror wyoming-whisper-trt, the consumer this fork exists to
+# serve, so a version combination that breaks there breaks here first. The
+# stale requirements_8.txt / requirements_10.txt next to this file pin TensorRT
+# 8.6 and 10.0 and are not what anything currently builds against.
+--extra-index-url https://pypi.nvidia.com
+
+torch==2.13.0
+tensorrt_cu13_bindings~=11.2.1.2
+tensorrt_cu13_libs~=11.2.1.2
+tensorrt~=11.2.1.2
+
+# Imported lazily inside torch2trt/precision.py and torch2trt/torch2trt.py.
+# Not needed to import the package, but needed for a type checker to resolve
+# those imports rather than report them as missing.
+nvidia-modelopt~=0.46.0
+onnx~=1.22.0
+onnx-graphsurgeon==0.6.1
+
+pytest==9.1.1
+ruff==0.16.5
+ty==0.0.77

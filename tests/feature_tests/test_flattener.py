@@ -132,9 +132,13 @@ def test_flattener_nested_dict():
 
 def test_flattener_heterogeneous():
 
+    # Named rather than inlined: what these assertions are really checking is
+    # that unflatten hands back the *same tensor objects*, and naming them says
+    # that directly instead of re-navigating the same path on both sides.
+    t1, t2, t3, t4, t5, t6 = (torch.ones(n) for n in range(1, 7))
     x = {
-        "a": (torch.ones(1), {"a": torch.ones(2)}),
-        "b": [torch.ones(3), torch.ones(4), (torch.ones(5), {"a": torch.ones(6)})],
+        "a": (t1, {"a": t2}),
+        "b": [t3, t4, (t5, {"a": t6})],
     }
 
     flattener = Flattener.from_value(x)
@@ -147,13 +151,13 @@ def test_flattener_heterogeneous():
 
     assert isinstance(z, dict)
     assert isinstance(z["a"], tuple)
-    assert z["a"][0] is x["a"][0]
+    assert z["a"][0] is t1
     assert isinstance(z["a"][1], dict)
-    assert z["a"][1]["a"] is x["a"][1]["a"]
+    assert z["a"][1]["a"] is t2
     assert isinstance(z["b"], list)
-    assert z["b"][0] is x["b"][0]
-    assert z["b"][1] is x["b"][1]
+    assert z["b"][0] is t3
+    assert z["b"][1] is t4
     assert isinstance(z["b"][2], tuple)
-    assert z["b"][2][0] is x["b"][2][0]
+    assert z["b"][2][0] is t5
     assert isinstance(z["b"][2][1], dict)
-    assert z["b"][2][1]["a"] is x["b"][2][1]["a"]
+    assert z["b"][2][1]["a"] is t6
