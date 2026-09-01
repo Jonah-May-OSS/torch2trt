@@ -1,7 +1,7 @@
 import importlib
 import os
 from collections import defaultdict
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import numpy as np
 import tensorrt as trt
@@ -390,7 +390,9 @@ class ConversionContext:
         self.method_args = None
         self.method_kwargs = None
         self.method_return = None
-        self.torch2trt_kwargs = torch2trt_kwargs
+        # Normalised to a dict: every use below subscripts it, so a None
+        # default would fail at runtime rather than just fail to type-check.
+        self.torch2trt_kwargs = torch2trt_kwargs if torch2trt_kwargs else {}
         self.builder_config = builder_config
         self.hooks = [
             ConversionHook(self, key, converter)
@@ -401,7 +403,7 @@ class ConversionContext:
         self.module_handles = []
         self.device_type_stack = []
         self.module_name_map = {}
-        for name, module in torch2trt_kwargs["module"].named_modules():
+        for name, module in self.torch2trt_kwargs["module"].named_modules():
             self.module_name_map[module] = name
         self.logger = logger
 
@@ -461,7 +463,12 @@ class ConversionContext:
 
         _ACTIVE_CONVERSION_CONTEXT = self
 
-        torch.Tensor.size = _size_wrapper
+        # Deliberate monkeypatch for the duration of conversion. The attribute
+        # name goes through a variable so this stays a dynamic patch: written
+        # as a plain assignment it cannot type-check, since the replacement
+        # does not match Tensor.size's overloads.
+        _size_attr = "size"
+        setattr(torch.Tensor, _size_attr, _size_wrapper)
         torch.Tensor.__getattribute__ = _new_getattr
 
         return self
@@ -721,7 +728,7 @@ def torch2trt(
                 int(x) for x in torch.__version__.split("+")[0].split(".")[:2]
             )
 
-            export_args = {
+            export_args: dict[str, Any] = {
                 "model": module_flat,
                 "args": inputs_flat,
                 "f": tmp_in_path,

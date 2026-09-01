@@ -1,4 +1,9 @@
-from torch2trt.torch2trt import *
+import torch
+
+# Resolved through eval() below, so no static analysis sees the use.
+from torch2trt.torch2trt import (
+    tensorrt_converter,
+)
 
 
 def is_private(method):
@@ -6,8 +11,13 @@ def is_private(method):
     return method[0] == "_" and method[1] != "_"
 
 
+# The namespaces below are resolved by name at runtime, so the reference to
+# torch has to be explicit or it reads as an unused import.
+_EVAL_NAMESPACE = {"torch": torch}
+
+
 def is_function_type(method):
-    fntype = eval(method + ".__class__.__name__")
+    fntype = eval(method + ".__class__.__name__", _EVAL_NAMESPACE)
     return (
         fntype == "function"
         or fntype == "builtin_function_or_method"
@@ -17,7 +27,7 @@ def is_function_type(method):
 
 def get_methods(namespace):
     methods = []
-    for method in dir(eval(namespace)):
+    for method in dir(eval(namespace, _EVAL_NAMESPACE)):
         full_method = namespace + "." + method
         if not is_private(full_method) and is_function_type(full_method):
             methods.append(full_method)

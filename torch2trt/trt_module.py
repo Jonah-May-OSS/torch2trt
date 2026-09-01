@@ -167,8 +167,8 @@ class TRTModule(torch.nn.Module):
     def __init__(
         self,
         engine=None,
-        input_names=None,
-        output_names=None,
+        input_names=(),
+        output_names=(),
         input_flattener=None,
         output_flattener=None,
         device_memory=None,
@@ -193,8 +193,8 @@ class TRTModule(torch.nn.Module):
         if self.engine is not None:
             self.context = self._create_context()
             self._update_name_binindgs_maps()
-        self.input_names = input_names
-        self.output_names = output_names
+        self.input_names = list(input_names) if input_names else []
+        self.output_names = list(output_names) if output_names else []
         self.input_flattener = input_flattener
         self.output_flattener = output_flattener
 

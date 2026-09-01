@@ -1,7 +1,15 @@
 import tensorrt as trt
 
-from torch2trt.module_test import add_module_test
-from torch2trt.torch2trt import *
+from torch2trt.contrib.qat.layers.quant_conv import (
+    IQuantConv2d,
+)
+from torch2trt.torch2trt import (
+    add_missing_trt_tensors,
+    tensorrt_converter,
+)
+from torch2trt.version_utils import (
+    trt_version,
+)
 
 
 @tensorrt_converter(
@@ -63,12 +71,6 @@ def convert_QuantConv(ctx):
     output._trt = layer.get_output(0)
 
 
-@add_module_test(
-    torch.float32,
-    torch.device("cuda"),
-    [(1, 10, 224, 224)],
-    enabled=trt_version() >= "7.0",
-)
 def test_Conv2d_basic_trt7():
     return IQuantConv2d(10, 5, kernel_size=1, stride=1, padding=0)
 

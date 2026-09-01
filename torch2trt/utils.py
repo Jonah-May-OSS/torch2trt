@@ -1,7 +1,8 @@
-import graphviz
-
-
 def trt_network_to_dot_graph(network):
+    # Imported here: graphviz is an optional extra, and only this helper needs
+    # it, so importing torch2trt.utils must not require it.
+    import graphviz
+
     dot = graphviz.Digraph(comment="Network")
 
     # add nodes (layers)

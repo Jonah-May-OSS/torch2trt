@@ -160,16 +160,16 @@ class TensorBatchDataset(Dataset):
         else:
             return len(self.tensors[0])
 
-    def __getitem__(self, idx):
+    def __getitem__(self, index):
         if self.tensors is None:
             raise IndexError("Dataset is empty.")
-        return self.flattener.unflatten([t[idx : idx + 1] for t in self.tensors])
+        return self.flattener.unflatten([t[index : index + 1] for t in self.tensors])
 
-    def insert(self, tensors):
+    def insert(self, item):
         if self._flattener is None:
-            self._flattener = Flattener.from_value(tensors)
+            self._flattener = Flattener.from_value(item)
 
-        tensors = self.flattener.flatten(tensors)
+        tensors = self.flattener.flatten(item)
 
         if self.tensors is None:
             self.tensors = tensors
@@ -203,9 +203,9 @@ class FolderDataset(Dataset):
     def __getitem__(self, index):
         return torch.load(self.file_paths()[index])
 
-    def insert(self, tensors):
+    def insert(self, item):
         i = 0
         file_paths = [os.path.basename(path) for path in self.file_paths()]
         while f"input_{i}.pth" in file_paths:
             i += 1
-        torch.save(tensors, os.path.join(self.folder, f"input_{i}.pth"))
+        torch.save(item, os.path.join(self.folder, f"input_{i}.pth"))
