@@ -41,7 +41,7 @@ def torch_device_to_trt(device):
     elif device.type == torch.device("cpu").type:
         return trt.TensorLocation.HOST
     else:
-        return TypeError(f"{device} is not supported by tensorrt")
+        raise TypeError(f"{device} is not supported by tensorrt")
 
 
 def torch_device_from_trt(device):
@@ -50,7 +50,7 @@ def torch_device_from_trt(device):
     elif device == trt.TensorLocation.HOST:
         return torch.device("cpu")
     else:
-        return TypeError(f"{device} is not supported by torch")
+        raise TypeError(f"{device} is not supported by torch")
 
 
 def trt_int_dtype():
