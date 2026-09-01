@@ -1,13 +1,11 @@
-import torch
-import tensorrt as trt
 import os
+
+import tensorrt as trt
+
 from .flattener import Flattener
 from .precision import LEGACY_INT8_CALIBRATION_AVAILABLE
 
-__all__ = [
-    'DEFAULT_CALIBRATION_ALGORITHM',
-    'DatasetCalibrator'
-]
+__all__ = ["DEFAULT_CALIBRATION_ALGORITHM", "DatasetCalibrator"]
 
 
 # TensorRT 11 removed implicit quantization along with CalibrationAlgoType and
@@ -16,7 +14,7 @@ __all__ = [
 # instead: explicit Q/DQ quantization replaces calibration there.
 if not LEGACY_INT8_CALIBRATION_AVAILABLE:
     DEFAULT_CALIBRATION_ALGORITHM = None
-elif trt.__version__ >= '5.1':
+elif trt.__version__ >= "5.1":
     DEFAULT_CALIBRATION_ALGORITHM = trt.CalibrationAlgoType.ENTROPY_CALIBRATION_2
 else:
     DEFAULT_CALIBRATION_ALGORITHM = trt.CalibrationAlgoType.ENTROPY_CALIBRATION
@@ -26,8 +24,13 @@ _CalibratorBase = trt.IInt8Calibrator if LEGACY_INT8_CALIBRATION_AVAILABLE else 
 
 
 class DatasetCalibrator(_CalibratorBase):
-
-    def __init__(self, dataset, algorithm=DEFAULT_CALIBRATION_ALGORITHM, cache_file=None, flattener=None):
+    def __init__(
+        self,
+        dataset,
+        algorithm=DEFAULT_CALIBRATION_ALGORITHM,
+        cache_file=None,
+        flattener=None,
+    ):
         if not LEGACY_INT8_CALIBRATION_AVAILABLE:
             raise RuntimeError(
                 f"TensorRT {trt.__version__} removed implicit INT8 quantization, so there "
@@ -35,7 +38,7 @@ class DatasetCalibrator(_CalibratorBase):
                 "Q/DQ, e.g. with modelopt.torch.quantization) and convert with "
                 "int8_mode=True."
             )
-        super(DatasetCalibrator, self).__init__()
+        super().__init__()
         self.dataset = dataset
         self.algorithm = algorithm
         self.count = 0
@@ -61,10 +64,10 @@ class DatasetCalibrator(_CalibratorBase):
 
     def read_calibration_cache(self, *args, **kwargs):
         if (self.cache_file is not None) and os.path.exists(self.cache_file):
-            with open(self.cache_file, 'rb') as f:
+            with open(self.cache_file, "rb") as f:
                 return f.read()
-                
+
     def write_calibration_cache(self, cache, *args, **kwargs):
         if self.cache_file is not None:
-            with open(self.cache_file, 'wb') as f:
+            with open(self.cache_file, "wb") as f:
                 f.write(cache)

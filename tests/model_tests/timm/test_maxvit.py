@@ -1,11 +1,7 @@
-import pytest
-import torch2trt
-from timm.models.maxxvit import (
-    maxvit_tiny_rw_224,
-    maxvit_rmlp_pico_rw_256,
-    maxvit_rmlp_small_rw_224
-)
 import torch
+from timm.models.maxxvit import maxvit_rmlp_small_rw_224, maxvit_tiny_rw_224
+
+import torch2trt
 
 
 def _cross_validate_module(model, shape=(224, 224)):

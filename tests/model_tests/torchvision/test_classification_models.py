@@ -1,5 +1,6 @@
 import torch
 import torchvision
+
 import torch2trt
 
 
@@ -13,7 +14,6 @@ def _cross_validate_module(model, shape=(224, 224)):
     assert torch.allclose(out, out_trt, rtol=1e-1, atol=1e-1)
 
 
-    
 def test_alexnet():
     model = torchvision.models.alexnet(pretrained=False)
     _cross_validate_module(model)

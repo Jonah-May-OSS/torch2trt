@@ -1,15 +1,11 @@
 import logging
 
-import torch
 import tensorrt as trt
+import torch
+
 from .flattener import Flattener
-from .misc_utils import (
-    torch_dtype_from_trt,
-    torch_device_from_trt
-)
-from .version_utils import (
-    trt_version
-)
+from .misc_utils import torch_device_from_trt, torch_dtype_from_trt
+from .version_utils import trt_version
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +68,7 @@ class SharedDeviceMemory:
         if user_managed is not None:
             return engine.create_execution_context(user_managed)
 
-        legacy = getattr(
-            engine, "create_execution_context_without_device_memory", None
-        )
+        legacy = getattr(engine, "create_execution_context_without_device_memory", None)
         return legacy() if legacy is not None else None
 
     @staticmethod
@@ -138,11 +132,12 @@ class SharedDeviceMemory:
         return bound
 
     def _bind(self, contexts):
+        assert self._buffer is not None, "_bind requires an allocated buffer"
         address = self._buffer.data_ptr()
         size = self._buffer.numel()
         # A list, not a generator: all() short-circuits, and every context must
         # actually be bound rather than abandoned after the first failure.
-        return all([self._bind_context(context, address, size) for context in contexts])
+        return all(self._bind_context(context, address, size) for context in contexts)
 
 
 def _describe_profile(engine, context, name):
@@ -169,8 +164,16 @@ def _describe_io(engine, context):
 
 
 class TRTModule(torch.nn.Module):
-    def __init__(self, engine=None, input_names=None, output_names=None, input_flattener=None, output_flattener=None, device_memory=None):
-        super(TRTModule, self).__init__()
+    def __init__(
+        self,
+        engine=None,
+        input_names=None,
+        output_names=None,
+        input_flattener=None,
+        output_flattener=None,
+        device_memory=None,
+    ):
+        super().__init__()
         self._register_state_dict_hook(TRTModule._on_state_dict)
         # Optional SharedDeviceMemory; when set, this module's context draws its
         # scratch from the pool instead of reserving a private one.
@@ -178,14 +181,14 @@ class TRTModule(torch.nn.Module):
 
         if isinstance(engine, str):
             # assume filepath
-            with open(engine, 'rb') as f:
+            with open(engine, "rb") as f:
                 engine = f.read()
             with trt.Logger() as logger, trt.Runtime(logger) as runtime:
                 engine = runtime.deserialize_cuda_engine(engine)
         elif isinstance(engine, trt.IHostMemory):
             with trt.Logger() as logger, trt.Runtime(logger) as runtime:
                 engine = runtime.deserialize_cuda_engine(engine)
-            
+
         self.engine = engine
         if self.engine is not None:
             self.context = self._create_context()
@@ -194,7 +197,7 @@ class TRTModule(torch.nn.Module):
         self.output_names = output_names
         self.input_flattener = input_flattener
         self.output_flattener = output_flattener
-    
+
     def _create_context(self):
         pool = getattr(self, "device_memory", None)
         if pool is not None:
@@ -231,8 +234,10 @@ class TRTModule(torch.nn.Module):
         state_dict[prefix + "engine"] = bytearray(self.engine.serialize())
         state_dict[prefix + "input_names"] = self.input_names
         state_dict[prefix + "output_names"] = self.output_names
-        state_dict[prefix + "input_flattener"] = self.input_flattener.dict()
-        state_dict[prefix + "output_flattener"] = self.output_flattener.dict()
+        if self.input_flattener is not None:
+            state_dict[prefix + "input_flattener"] = self.input_flattener.dict()
+        if self.output_flattener is not None:
+            state_dict[prefix + "output_flattener"] = self.output_flattener.dict()
 
     def _load_from_state_dict(
         self,
@@ -254,13 +259,13 @@ class TRTModule(torch.nn.Module):
         self.input_names = state_dict[prefix + "input_names"]
         self.output_names = state_dict[prefix + "output_names"]
 
-        if 'input_flattener' in state_dict:
-            self.input_flattener = Flattener.from_dict(state_dict['input_flattener'])
+        if "input_flattener" in state_dict:
+            self.input_flattener = Flattener.from_dict(state_dict["input_flattener"])
         else:
             self.input_flattener = None
 
-        if 'output_flattener' in state_dict:
-            self.output_flattener = Flattener.from_dict(state_dict['output_flattener'])
+        if "output_flattener" in state_dict:
+            self.output_flattener = Flattener.from_dict(state_dict["output_flattener"])
         else:
             self.output_flattener = None
 
@@ -268,7 +273,7 @@ class TRTModule(torch.nn.Module):
 
     def _forward_pre_10(self, *inputs):
         bindings = [None] * (len(self.input_names) + len(self.output_names))
-        
+
         if self.input_flattener is not None:
             inputs = self.input_flattener.flatten(inputs)
 

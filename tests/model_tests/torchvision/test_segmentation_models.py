@@ -1,14 +1,16 @@
 import torch
 import torchvision
+
 import torch2trt
 
 
 class ModelWrapper(torch.nn.Module):
     def __init__(self, model):
-        super(ModelWrapper, self).__init__()
+        super().__init__()
         self.model = model
+
     def forward(self, x):
-        return self.model(x)['out']
+        return self.model(x)["out"]
 
 
 def _cross_validate_module(model, shape=(224, 224)):
@@ -19,7 +21,6 @@ def _cross_validate_module(model, shape=(224, 224)):
     out = model(data)
     out_trt = model_trt(data)
     assert torch.allclose(out, out_trt, rtol=1e-2, atol=1e-2)
-
 
 
 def test_deeplabv3_resnet50():

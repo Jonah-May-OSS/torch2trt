@@ -12,7 +12,6 @@ def torch_version():
 
 
 class Version(packaging.version.Version):
-
     def __ge__(self, other):
         if isinstance(other, str):
             other = Version(other)
@@ -32,9 +31,8 @@ class Version(packaging.version.Version):
         if isinstance(other, str):
             other = Version(other)
         return super().__gt__(other)
-    
+
     def __lt__(self, other):
         if isinstance(other, str):
             other = Version(other)
         return super().__lt__(other)
-    

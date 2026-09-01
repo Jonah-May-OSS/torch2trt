@@ -54,7 +54,7 @@ print(torch.max(torch.abs(y - y_trt)))
 We can save the model as a ``state_dict``.
 
 ```python
-torch.save(model_trt.state_dict(), 'alexnet_trt.pth')
+torch.save(model_trt.state_dict(), "alexnet_trt.pth")
 ```
 
 We can load the saved model into a ``TRTModule``
@@ -64,7 +64,7 @@ from torch2trt import TRTModule
 
 model_trt = TRTModule()
 
-model_trt.load_state_dict(torch.load('alexnet_trt.pth'))
+model_trt.load_state_dict(torch.load("alexnet_trt.pth"))
 ```
 
 ## Models
@@ -162,11 +162,12 @@ python API.
 import tensorrt as trt
 from torch2trt import tensorrt_converter
 
-@tensorrt_converter('torch.nn.ReLU.forward')
+
+@tensorrt_converter("torch.nn.ReLU.forward")
 def convert_ReLU(ctx):
     input = ctx.method_args[1]
     output = ctx.method_return
-    layer = ctx.network.add_activation(input=input._trt, type=trt.ActivationType.RELU)  
+    layer = ctx.network.add_activation(input=input._trt, type=trt.ActivationType.RELU)
     output._trt = layer.get_output(0)
 ```
 

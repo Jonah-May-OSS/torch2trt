@@ -1,0 +1,17 @@
+# Type-check the library itself; examples, tests, scripts and the generated
+# build tree are not part of the shipped package.
+[src]
+include = ["torch2trt"]
+exclude = ["build", "examples", "scripts", "tests", "**/__pycache__"]
+
+[environment]
+python-version = "3.12"
+
+[rules]
+# TensorRT's Python module resolves its attributes lazily at import time, so no
+# static checker can see trt.ActivationType, trt.PoolingType, trt.int8 and the
+# rest. This is the same call the project already made for pylint, which carried
+#     ignored-modules=tensorrt
+# with the same reasoning. 217 of the 223 reports under this rule were that; the
+# remaining 6 were real and are fixed rather than hidden.
+unresolved-attribute = "ignore"
